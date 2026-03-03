@@ -48,10 +48,6 @@ bool ggml_ane_should_offload_op(const struct ggml_tensor * op) {
             // Attention softmax
             return false; // Phase 3
         
-        case GGML_OP_SILU:
-            // FFN activation
-            return false; // Phase 3
-        
         default:
             return false;
     }
@@ -65,7 +61,6 @@ enum ggml_ane_kernel_type {
     GGML_ANE_KERNEL_MUL,
     GGML_ANE_KERNEL_RMS_NORM,
     GGML_ANE_KERNEL_SOFTMAX,
-    GGML_ANE_KERNEL_SILU,
     GGML_ANE_KERNEL_FUSED_QKV, // Fused Q, K, V projections
     GGML_ANE_KERNEL_FUSED_FFN, // Fused FFN up (w1 + w3)
 };
@@ -83,8 +78,6 @@ enum ggml_ane_kernel_type ggml_ane_get_kernel_type(const struct ggml_tensor * op
             return GGML_ANE_KERNEL_RMS_NORM;
         case GGML_OP_SOFT_MAX:
             return GGML_ANE_KERNEL_SOFTMAX;
-        case GGML_OP_SILU:
-            return GGML_ANE_KERNEL_SILU;
         default:
             return GGML_ANE_KERNEL_MATMUL; // Fallback
     }
@@ -123,15 +116,6 @@ void ggml_ane_calc_io_sizes(
             input_sizes[1] = ne * 2;
             output_sizes[0] = ne * 2;
             *n_inputs = 2;
-            *n_outputs = 1;
-            break;
-        }
-        
-        case GGML_OP_SILU: {
-            int64_t ne = ggml_nelements(op);
-            input_sizes[0] = ne * 2;
-            output_sizes[0] = ne * 2;
-            *n_inputs = 1;
             *n_outputs = 1;
             break;
         }

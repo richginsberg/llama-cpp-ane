@@ -110,6 +110,15 @@ static const char * ggml_backend_ane_buffer_type_get_name(ggml_backend_buffer_ty
 
 static ggml_backend_buffer_t ggml_backend_ane_buffer_type_alloc_buffer(ggml_backend_buffer_type_t buft, size_t size) {
 #ifdef __APPLE__
+    // Reject large allocations - ANE is for compute, not storage
+    // Model weights should go to CPU/Metal
+    const size_t max_buffer_size = 256ULL * 1024ULL * 1024ULL;  // 256MB
+    if (size > max_buffer_size) {
+        GGML_ANE_LOG_DEBUG("Rejecting large buffer allocation: %zu MB (max %zu MB) - use CPU/Metal for model weights",
+                          size / (1024 * 1024), max_buffer_size / (1024 * 1024));
+        return nullptr;  // Return nullptr to trigger fallback
+    }
+    
     @autoreleasepool {
         // Align to page boundary for IOSurface
         size_t aligned_size = (size + 4095) & ~4095;
@@ -191,9 +200,10 @@ static size_t ggml_backend_ane_buffer_type_get_alignment(ggml_backend_buffer_typ
 }
 
 static size_t ggml_backend_ane_buffer_type_get_max_size(ggml_backend_buffer_type_t buft) {
-    // ANE can access unified memory, but practical limit is ~2GB per buffer
-    // due to IOSurface constraints
-    return 2ULL * 1024ULL * 1024ULL * 1024ULL;
+    // ANE is for compute, not storage. Limit buffer size to 256MB.
+    // Larger allocations should go to CPU/Metal.
+    // This prevents trying to load entire models into ANE memory.
+    return 256ULL * 1024ULL * 1024ULL;  // 256MB max
     GGML_UNUSED(buft);
 }
 

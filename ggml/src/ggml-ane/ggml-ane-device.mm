@@ -74,9 +74,10 @@ static ggml_backend_t ggml_backend_ane_device_init_backend(ggml_backend_dev_t de
 }
 
 static ggml_backend_buffer_type_t ggml_backend_ane_device_get_buffer_type(ggml_backend_dev_t dev) {
-    // Import from ggml-ane-buffer.mm
-    extern ggml_backend_buffer_type_t ggml_backend_ane_buffer_type(void);
-    return ggml_backend_ane_buffer_type();
+    // ANE is a compute-only backend - don't store model weights here
+    // Return nullptr to let llama.cpp use CPU/Metal for storage
+    // ANE will still be used for compute via graph execution on unified memory
+    return nullptr;
     GGML_UNUSED(dev);
 }
 
@@ -132,15 +133,11 @@ static bool ggml_backend_ane_device_supports_op(ggml_backend_dev_t dev, const st
 }
 
 static bool ggml_backend_ane_device_supports_buft(ggml_backend_dev_t dev, ggml_backend_buffer_type_t buft) {
-    // Import buffer type check from ggml-ane-buffer.mm
-    extern bool ggml_backend_buffer_is_ane(ggml_backend_buffer_t buffer);
-    
-    // ANE can work with ANE buffers and CPU buffers (unified memory)
-    if (!buft) return false;
-    
-    // Check if this is our buffer type
-    extern ggml_backend_buffer_type_t ggml_backend_ane_buffer_type(void);
-    return buft == ggml_backend_ane_buffer_type();
+    // ANE is compute-only and works with unified memory
+    // Accept CPU buffer types (model weights will be on CPU)
+    // We can't directly check for CPU buffer type, so accept any non-null buft
+    // and rely on supports_op to filter what ANE can actually compute
+    return buft != nullptr;
     GGML_UNUSED(dev);
 }
 

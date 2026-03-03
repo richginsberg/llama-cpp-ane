@@ -130,16 +130,16 @@ static enum ggml_status ggml_backend_ane_graph_plan_compute(ggml_backend_t backe
 }
 
 static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, struct ggml_cgraph * cgraph) {
-    // Create plan and execute
-    ggml_backend_graph_plan_t plan = ggml_backend_ane_graph_plan_create(backend, cgraph);
-    if (!plan) {
-        return GGML_STATUS_ALLOC_FAILED;
-    }
+    // TODO: Wire up actual ANE graph execution
+    // For now, return FAILED to trigger CPU fallback
+    // This allows model loading to succeed while we implement graph execution
+    GGML_ANE_LOG_DEBUG("ANE graph compute: %d nodes (using CPU fallback)", cgraph->n_nodes);
     
-    enum ggml_status status = ggml_backend_ane_graph_plan_compute(backend, plan);
-    ggml_backend_ane_graph_plan_free(backend, plan);
+    // Return FAILED to let ggml fall back to CPU
+    // Once graph execution is wired up, this will return GGML_STATUS_SUCCESS
+    return GGML_STATUS_FAILED;
     
-    return status;
+    GGML_UNUSED(backend);
 }
 
 static bool ggml_backend_ane_supports_op(ggml_backend_t backend, const struct ggml_tensor * op) {

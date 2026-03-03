@@ -82,6 +82,10 @@
 #include "ggml-zendnn.h"
 #endif
 
+#ifdef GGML_USE_ANE
+#include "ggml-ane.h"
+#endif
+
 namespace fs = std::filesystem;
 
 static std::string path_str(const fs::path & path) {
@@ -114,6 +118,9 @@ struct ggml_backend_registry {
 #endif
 #ifdef GGML_USE_METAL
         register_backend(ggml_backend_metal_reg());
+#endif
+#ifdef GGML_USE_ANE
+        register_backend(ggml_backend_ane_reg());
 #endif
 #ifdef GGML_USE_SYCL
         register_backend(ggml_backend_sycl_reg());

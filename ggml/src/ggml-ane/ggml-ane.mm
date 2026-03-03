@@ -1,12 +1,16 @@
-// ggml-ane.cpp - ANE backend registration and main entry point
+// ggml-ane.mm - ANE backend registration and main entry point
+#import <Foundation/Foundation.h>
 #include "ggml-ane.h"
 #include "ggml-ane-impl.h"
 #include "ggml-impl.h"
 #include "ggml-backend-impl.h"
+#include "ggml-cpu.h"
 
 #include <stdlib.h>
 #include <string.h>
 #include <new>
+#include <map>
+#include <mutex>
 
 #ifdef __APPLE__
 #include <TargetConditionals.h>
@@ -23,20 +27,31 @@
 // External declarations (from ggml-ane-device.mm)
 ////////////////////////////////////////////////////////////////////////////////
 
-// Device struct and initialization flag (defined in ggml-ane-device.mm)
 extern "C" struct ggml_backend_device g_ane_device;
 extern "C" bool g_ane_device_initialized;
 extern "C" bool ggml_ane_device_init(void);
 
 ////////////////////////////////////////////////////////////////////////////////
-// GUID Definition (must be before use)
+// Kernel Cache
+////////////////////////////////////////////////////////////////////////////////
+
+static std::map<uint64_t, ggml_ane_kernel_t> g_matmul_kernels;
+static std::mutex g_matmul_kernels_mutex;
+
+// Simple hash for matmul dimensions
+static uint64_t hash_matmul_dims(int64_t m, int64_t n, int64_t k) {
+    return ((uint64_t)m << 42) | ((uint64_t)n << 21) | (uint64_t)k;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// GUID Definition
 ////////////////////////////////////////////////////////////////////////////////
 
 static ggml_guid_t ggml_backend_ane_guid(void) {
     static ggml_guid guid = { 
         0x41, 0x4e, 0x45, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
-    }; // "ANE" prefix
+    };
     return &guid;
 }
 
@@ -52,7 +67,6 @@ static const char * ggml_backend_ane_name(ggml_backend_t backend) {
 static void ggml_backend_ane_free(ggml_backend_t backend) {
     ggml_ane_context * ctx = (ggml_ane_context *)backend->context;
     if (ctx) {
-        // TODO: Free kernel cache
         delete ctx;
     }
     delete backend;
@@ -64,22 +78,17 @@ static ggml_backend_buffer_type_t ggml_backend_ane_get_default_buffer_type(ggml_
 }
 
 static void ggml_backend_ane_set_tensor_async(ggml_backend_t backend, struct ggml_tensor * tensor, const void * data, size_t offset, size_t size) {
-    // ANE uses unified memory, so this is just a memcpy
     memcpy((char *)tensor->data + offset, data, size);
     GGML_UNUSED(backend);
 }
 
 static void ggml_backend_ane_get_tensor_async(ggml_backend_t backend, const struct ggml_tensor * tensor, void * data, size_t offset, size_t size) {
-    // ANE uses unified memory, so this is just a memcpy
     memcpy(data, (const char *)tensor->data + offset, size);
     GGML_UNUSED(backend);
 }
 
 static bool ggml_backend_ane_cpy_tensor_async(ggml_backend_t backend_src, ggml_backend_t backend_dst, const struct ggml_tensor * src, struct ggml_tensor * dst) {
-    // Check if both tensors are in ANE buffers
     if (src->buffer && dst->buffer) {
-        // Use async copy if possible
-        // For now, fall back to sync
         return false;
     }
     return false;
@@ -88,19 +97,15 @@ static bool ggml_backend_ane_cpy_tensor_async(ggml_backend_t backend_src, ggml_b
 }
 
 static void ggml_backend_ane_synchronize(ggml_backend_t backend) {
-    // ANE operations are synchronous by default
-    // Nothing to do here
     GGML_UNUSED(backend);
 }
 
 static ggml_backend_graph_plan_t ggml_backend_ane_graph_plan_create(ggml_backend_t backend, const struct ggml_cgraph * cgraph) {
     ggml_ane_graph_plan * plan = new ggml_ane_graph_plan();
     plan->graph = const_cast<struct ggml_cgraph *>(cgraph);
-    
-    // TODO: Analyze graph and compile kernels
-    // For now, mark all nodes as unsupported (CPU fallback)
     plan->node_supported.resize(cgraph->n_nodes, false);
     plan->node_order.resize(cgraph->n_nodes);
+    
     for (int i = 0; i < cgraph->n_nodes; i++) {
         plan->node_order[i] = i;
     }
@@ -112,32 +117,223 @@ static ggml_backend_graph_plan_t ggml_backend_ane_graph_plan_create(ggml_backend
 static void ggml_backend_ane_graph_plan_free(ggml_backend_t backend, ggml_backend_graph_plan_t plan) {
     ggml_ane_graph_plan * ctx = (ggml_ane_graph_plan *)plan;
     if (ctx) {
-        // TODO: Free kernels
         delete ctx;
     }
     GGML_UNUSED(backend);
 }
 
 static enum ggml_status ggml_backend_ane_graph_plan_compute(ggml_backend_t backend, ggml_backend_graph_plan_t plan) {
-    ggml_ane_graph_plan * ctx = (ggml_ane_graph_plan *)plan;
-    
-    // TODO: Execute compiled kernels
-    // For now, return error (not implemented)
-    GGML_ANE_LOG_ERROR("graph_plan_compute not yet implemented");
-    
     return GGML_STATUS_FAILED;
     GGML_UNUSED(backend);
+    GGML_UNUSED(plan);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Graph Execution - Core Implementation
+////////////////////////////////////////////////////////////////////////////////
+
+// Execute a single MUL_MAT on ANE
+static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
+    struct ggml_tensor * src0 = dst->src[0];  // Weights [K, N] or [N, K]
+    struct ggml_tensor * src1 = dst->src[1];  // Input [K, M] or [M, K]
+    
+    if (!src0 || !src1) {
+        return false;
+    }
+    
+    // Get dimensions
+    // src0 (weights): ne[0] x ne[1] = K x N (or transposed)
+    // src1 (input): ne[0] x ne[1] = K x M (for batch M)
+    // dst (output): ne[0] x ne[1] = N x M
+    
+    const int64_t K = src0->ne[0];
+    const int64_t N = src0->ne[1];
+    const int64_t M = src1->ne[1];
+    
+    // Handle transposed weights (common in llama.cpp)
+    // If src0->ne[0] != src1->ne[0], weights might be transposed
+    bool src0_transposed = false;
+    if (src0->ne[0] != src1->ne[0]) {
+        // Check if transposed makes sense
+        if (src0->ne[1] == src1->ne[0]) {
+            src0_transposed = true;
+        }
+    }
+    
+    // Adjust dimensions based on transpose
+    int64_t in_ch, out_ch, spatial;
+    if (src0_transposed) {
+        // src0 is [N, K], need to treat as [K, N]
+        in_ch = N;   // K in original terms
+        out_ch = K;  // N in original terms
+    } else {
+        // src0 is [K, N]
+        in_ch = K;
+        out_ch = N;
+    }
+    spatial = M;
+    
+    // Skip if too small (not worth ANE overhead)
+    if (in_ch * out_ch * spatial < 64 * 1024) {
+        return false;  // < 64K elements, CPU is faster
+    }
+    
+    // Skip if too large for ANE SRAM (~32MB working set)
+    size_t working_set = in_ch * out_ch * 2 + in_ch * spatial * 2 + out_ch * spatial * 2;
+    if (working_set > 64 * 1024 * 1024) {  // 64MB limit (allow some spill)
+        GGML_ANE_LOG_DEBUG("MUL_MAT too large for ANE: %zu MB working set", working_set / (1024 * 1024));
+        return false;
+    }
+    
+    // Check if we have a cached kernel for these dimensions
+    uint64_t hash = hash_matmul_dims(in_ch, out_ch, spatial);
+    
+    ggml_ane_kernel_t kernel = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_matmul_kernels_mutex);
+        auto it = g_matmul_kernels.find(hash);
+        if (it != g_matmul_kernels.end()) {
+            kernel = it->second;
+        }
+    }
+    
+    // Compile kernel if not cached
+    if (!kernel) {
+        // Generate MIL for conv-based matmul
+        NSString * mil = ggml_ane_gen_mil_conv(in_ch, out_ch, spatial);
+        const char * mil_cstr = [mil UTF8String];
+        
+        // Build weight blob
+        // Weights need to be [out_ch, in_ch] for conv format
+        float * weights_transposed = nullptr;
+        const float * weights = (const float *)src0->data;
+        
+        if (src0_transposed) {
+            // Already [N, K] = [out_ch, in_ch], use directly
+            weights_transposed = nullptr;
+        } else {
+            // Need to transpose from [K, N] to [N, K]
+            weights_transposed = (float *)malloc(out_ch * in_ch * sizeof(float));
+            for (int64_t n = 0; n < out_ch; n++) {
+                for (int64_t k = 0; k < in_ch; k++) {
+                    weights_transposed[n * in_ch + k] = weights[k * out_ch + n];
+                }
+            }
+            weights = weights_transposed;
+        }
+        
+        NSData * weight_blob = ggml_ane_build_weight_blob(weights, out_ch, in_ch);
+        
+        if (weights_transposed) {
+            free(weights_transposed);
+        }
+        
+        // Compile
+        size_t input_size = in_ch * spatial * sizeof(float);
+        size_t output_size = out_ch * spatial * sizeof(float);
+        
+        kernel = ggml_ane_compile_kernel(
+            mil_cstr,
+            [weight_blob bytes],
+            [weight_blob length],
+            1, &input_size,
+            1, &output_size,
+            hash  // Cache key
+        );
+        
+        if (!kernel) {
+            GGML_ANE_LOG_ERROR("Failed to compile ANE kernel for MUL_MAT");
+            return false;
+        }
+        
+        // Cache it
+        {
+            std::lock_guard<std::mutex> lock(g_matmul_kernels_mutex);
+            g_matmul_kernels[hash] = kernel;
+        }
+    }
+    
+    // Prepare input data
+    // Input is [K, M] in row-major, ANE expects [1, K, 1, M]
+    float * input_conv = (float *)malloc(in_ch * spatial * sizeof(float));
+    const float * src1_data = (const float *)src1->data;
+    
+    for (int64_t m = 0; m < spatial; m++) {
+        for (int64_t k = 0; k < in_ch; k++) {
+            // src1 is [K, M] row-major, ANE wants [K, M] but as [1, K, 1, M]
+            input_conv[k * spatial + m] = src1_data[m * in_ch + k];
+        }
+    }
+    
+    // Allocate output
+    float * output_conv = (float *)malloc(out_ch * spatial * sizeof(float));
+    
+    // Execute
+    const void * inputs[1] = { input_conv };
+    void * outputs[1] = { output_conv };
+    
+    bool success = ggml_ane_execute(kernel, inputs, outputs);
+    
+    if (!success) {
+        GGML_ANE_LOG_ERROR("ANE execution failed for MUL_MAT");
+        free(input_conv);
+        free(output_conv);
+        return false;
+    }
+    
+    // Convert output back to row-major [N, M]
+    float * dst_data = (float *)dst->data;
+    for (int64_t m = 0; m < spatial; m++) {
+        for (int64_t n = 0; n < out_ch; n++) {
+            // ANE output is [1, N, 1, M], convert to [N, M] row-major
+            dst_data[m * out_ch + n] = output_conv[n * spatial + m];
+        }
+    }
+    
+    free(input_conv);
+    free(output_conv);
+    
+    return true;
 }
 
 static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, struct ggml_cgraph * cgraph) {
-    // TODO: Wire up actual ANE graph execution
-    // For now, return FAILED to trigger CPU fallback
-    // This allows model loading to succeed while we implement graph execution
-    GGML_ANE_LOG_DEBUG("ANE graph compute: %d nodes (using CPU fallback)", cgraph->n_nodes);
+    if (!GGML_ANE_AVAILABLE) {
+        return GGML_STATUS_FAILED;
+    }
     
-    // Return FAILED to let ggml fall back to CPU
-    // Once graph execution is wired up, this will return GGML_STATUS_SUCCESS
-    return GGML_STATUS_FAILED;
+    // Initialize runtime if needed
+    if (!ggml_ane_runtime_init()) {
+        return GGML_STATUS_FAILED;
+    }
+    
+    int ane_ops = 0;
+    int cpu_ops = 0;
+    
+    // Process each node
+    for (int i = 0; i < cgraph->n_nodes; i++) {
+        struct ggml_tensor * node = cgraph->nodes[i];
+        
+        switch (node->op) {
+            case GGML_OP_MUL_MAT:
+                // Try to execute on ANE
+                if (ggml_ane_exec_mul_mat(node)) {
+                    ane_ops++;
+                    break;  // Success, move to next node
+                }
+                // Failed, fall through to CPU
+                cpu_ops++;
+                return GGML_STATUS_FAILED;  // Let ggml fall back to CPU for entire graph
+                
+            default:
+                // Unsupported op, need CPU fallback
+                cpu_ops++;
+                return GGML_STATUS_FAILED;
+        }
+    }
+    
+    GGML_ANE_LOG_DEBUG("ANE graph compute: %d ops on ANE, %d on CPU", ane_ops, cpu_ops);
+    
+    return (cpu_ops == 0) ? GGML_STATUS_SUCCESS : GGML_STATUS_FAILED;
     
     GGML_UNUSED(backend);
 }
@@ -147,22 +343,31 @@ static bool ggml_backend_ane_supports_op(ggml_backend_t backend, const struct gg
         return false;
     }
     
-    // TODO: Implement comprehensive op support detection
     switch (op->op) {
-        case GGML_OP_MUL_MAT:
-            // ANE supports matmul (but 1x1 conv is faster)
+        case GGML_OP_MUL_MAT: {
+            // Check dimensions
+            if (!op->src[0] || !op->src[1]) return false;
+            
+            const int64_t ne0 = op->src[0]->ne[0];
+            const int64_t ne1 = op->src[0]->ne[1];
+            const int64_t M = op->src[1]->ne[1];
+            
+            // Skip small matrices (CPU is faster)
+            if (ne0 * ne1 * M < 64 * 1024) return false;
+            
+            // Check if fits in ANE SRAM
+            size_t working_set = ne0 * ne1 * 2 + ne0 * M * 2 + ne1 * M * 2;
+            if (working_set > 64 * 1024 * 1024) return false;
+            
             return true;
+        }
         case GGML_OP_ADD:
         case GGML_OP_MUL:
         case GGML_OP_SOFT_MAX:
-            // Elementwise ops supported
-            return true;
         case GGML_OP_RMS_NORM:
-            // Can be implemented with fused ops
-            return true;
+            return true;  // Supported but not yet implemented
         case GGML_OP_ROPE:
-            // Complex, CPU fallback for now
-            return false;
+            return false;  // Complex, CPU fallback
         default:
             return false;
     }
@@ -170,28 +375,12 @@ static bool ggml_backend_ane_supports_op(ggml_backend_t backend, const struct gg
 }
 
 static bool ggml_backend_ane_offload_op(ggml_backend_t backend, const struct ggml_tensor * op) {
-    // Only offload ops that benefit from ANE's efficiency
     if (!ggml_backend_ane_supports_op(backend, op)) {
         return false;
     }
     
-    // Matrix multiplication is the sweet spot for ANE
+    // Only offload MUL_MAT for now (implemented)
     if (op->op == GGML_OP_MUL_MAT) {
-        // Check tensor sizes - ANE is best for medium-large matrices
-        const int64_t ne0 = op->src[0]->ne[0];
-        const int64_t ne1 = op->src[0]->ne[1];
-        
-        // Avoid dispatch-limited small ops
-        if (ne0 * ne1 < 256 * 256) {
-            return false; // Too small, CPU is faster
-        }
-        
-        // Check SRAM limit (~32MB working set)
-        size_t working_set = ne0 * ne1 * 2 * 3; // 3 matrices, FP16
-        if (working_set > 32 * 1024 * 1024) {
-            // Might still benefit, but watch for SRAM spill
-        }
-        
         return true;
     }
     
@@ -199,8 +388,9 @@ static bool ggml_backend_ane_offload_op(ggml_backend_t backend, const struct ggm
 }
 
 static bool ggml_backend_ane_supports_buft(ggml_backend_t backend, ggml_backend_buffer_type_t buft) {
-    // ANE can work with ANE buffers
-    return buft == ggml_backend_ane_buffer_type();
+    // ANE works with CPU buffers (unified memory)
+    return buft == ggml_backend_cpu_buffer_type() || 
+           buft == ggml_backend_ane_buffer_type();
     GGML_UNUSED(backend);
 }
 
@@ -238,13 +428,10 @@ ggml_backend_t ggml_backend_ane_init(void) {
         return nullptr;
     }
     
-    // Initialize device if not already done
     ggml_ane_device_init();
     
     ggml_ane_context * ctx = new ggml_ane_context();
     memset(ctx, 0, sizeof(*ctx));
-    ctx->compile_count = 0;
-    ctx->needs_restart = false;
     
     ggml_backend_t backend = new ggml_backend();
     backend->guid = ggml_backend_ane_guid();
@@ -279,16 +466,13 @@ static ggml_backend_dev_t ggml_backend_ane_reg_get_device(ggml_backend_reg_t reg
         return nullptr;
     }
     
-    // Initialize device if needed
     if (!g_ane_device_initialized) {
         if (!ggml_ane_device_init()) {
             return nullptr;
         }
     }
     
-    // Set the registration pointer (needed for device enumeration)
     g_ane_device.reg = reg;
-    
     return &g_ane_device;
 }
 
@@ -337,12 +521,10 @@ bool ggml_ane_offload_op(const struct ggml_tensor * op) {
 ////////////////////////////////////////////////////////////////////////////////
 
 void ggml_ane_get_perf_stats(struct ggml_ane_perf_stats * stats) {
-    // TODO: Implement
     memset(stats, 0, sizeof(*stats));
 }
 
 void ggml_ane_reset_perf_stats(void) {
-    // TODO: Implement
 }
 
 ////////////////////////////////////////////////////////////////////////////////

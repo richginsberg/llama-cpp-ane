@@ -7,7 +7,7 @@ find_library(COREML_FRAMEWORK CoreML REQUIRED)
 message(STATUS "ANE frameworks found")
 
 ggml_add_backend_library(ggml-ane
-    ggml-ane.cpp
+    ggml-ane.mm
     ggml-ane-device.mm
     ggml-ane-buffer.mm
     ggml-ane-runtime.mm

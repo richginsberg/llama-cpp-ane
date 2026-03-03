@@ -318,6 +318,10 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
     for (int i = 0; i < cgraph->n_nodes; i++) {
         struct ggml_tensor * node = cgraph->nodes[i];
         
+        if (node->op == GGML_OP_NONE) {
+            continue;  // Skip placeholder nodes
+        }
+        
         if (node->op == GGML_OP_MUL_MAT) {
             mul_mat_ops++;
             
@@ -362,8 +366,12 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
             
             GGML_ANE_LOG_DEBUG("  MUL_MAT %d: dimensions %ldx%ldx%ld, could use ANE", i, ne0, ne1, M);
             supported_ops++;
-        } else if (node->op != GGML_OP_NONE) {
-            GGML_ANE_LOG_DEBUG("  Op %d: type=%d, not supported by ANE", i, node->op);
+        } else {
+            // For now, we only implement MUL_MAT
+            // TODO: Implement ADD, MUL, SOFT_MAX, etc.
+            const char * op_name = ggml_op_name(node->op);
+            GGML_ANE_LOG_DEBUG("  Op %d: %s (type=%d), not yet implemented in ANE", 
+                              i, op_name ? op_name : "unknown", node->op);
             unsupported_ops++;
         }
     }
@@ -371,8 +379,7 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
     GGML_ANE_LOG_INFO("ANE graph analysis: %d MUL_MAT, %d could use ANE, %d unsupported", 
                       mul_mat_ops, supported_ops, unsupported_ops);
     
-    // If we can't handle all ops, let ggml fall back
-    // (ggml doesn't support hybrid per-op execution across backends)
+    // If we can't handle all ops, let ggml fall back to CPU/Metal
     if (unsupported_ops > 0) {
         GGML_ANE_LOG_INFO("ANE: falling back to CPU/Metal (%d unsupported ops)", unsupported_ops);
         return GGML_STATUS_FAILED;
@@ -390,8 +397,13 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
                 }
                 break;
                 
+            case GGML_OP_NONE:
+                // Skip placeholder
+                break;
+                
             default:
                 // Shouldn't reach here if analysis was correct
+                GGML_ANE_LOG_ERROR("ANE: Unexpected op %d in execution phase", node->op);
                 return GGML_STATUS_FAILED;
         }
     }
@@ -407,10 +419,16 @@ static bool ggml_backend_ane_supports_op(ggml_backend_t backend, const struct gg
         return false;
     }
     
+    // For now, we only implement MUL_MAT
+    // TODO: Implement ADD, MUL, SOFT_MAX, RMS_NORM
     switch (op->op) {
         case GGML_OP_MUL_MAT: {
             // Check dimensions
             if (!op->src[0] || !op->src[1]) return false;
+            
+            // Check if quantized (ANE only supports FP16/FP32)
+            if (op->src[0]->type != GGML_TYPE_F32 && op->src[0]->type != GGML_TYPE_F16) return false;
+            if (op->src[1]->type != GGML_TYPE_F32 && op->src[1]->type != GGML_TYPE_F16) return false;
             
             const int64_t ne0 = op->src[0]->ne[0];
             const int64_t ne1 = op->src[0]->ne[1];
@@ -419,19 +437,12 @@ static bool ggml_backend_ane_supports_op(ggml_backend_t backend, const struct gg
             // Skip small matrices (CPU is faster)
             if (ne0 * ne1 * M < 64 * 1024) return false;
             
-            // Check if fits in ANE SRAM
+            // Check SRAM limit
             size_t working_set = ne0 * ne1 * 2 + ne0 * M * 2 + ne1 * M * 2;
             if (working_set > 64 * 1024 * 1024) return false;
             
             return true;
         }
-        case GGML_OP_ADD:
-        case GGML_OP_MUL:
-        case GGML_OP_SOFT_MAX:
-        case GGML_OP_RMS_NORM:
-            return true;  // Supported but not yet implemented
-        case GGML_OP_ROPE:
-            return false;  // Complex, CPU fallback
         default:
             return false;
     }

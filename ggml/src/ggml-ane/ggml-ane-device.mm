@@ -49,24 +49,17 @@ static const char * ggml_backend_ane_device_get_description(ggml_backend_dev_t d
 }
 
 static void ggml_backend_ane_device_get_memory(ggml_backend_dev_t dev, size_t * free, size_t * total) {
-#ifdef __APPLE__
-    @autoreleasepool {
-        NSProcessInfo *pi = [NSProcessInfo processInfo];
-        *total = [pi physicalMemory];
-        // ANE shares unified memory, so free is approximate
-        // In practice, the OS manages this
-        *free = *total / 2; // Conservative estimate
-    }
-#else
-    *free = 0;
-    *total = 0;
-#endif
+    // Report limited memory to prevent llama.cpp from putting model weights on ANE
+    // ANE uses unified memory - weights should stay on Metal/CPU
+    // We only need enough for compute buffers (activations)
+    *total = 256 * 1024 * 1024;  // 256 MB
+    *free = 256 * 1024 * 1024;
     GGML_UNUSED(dev);
 }
 
 static enum ggml_backend_dev_type ggml_backend_ane_device_get_type(ggml_backend_dev_t dev) {
-    // Must return GPU type to be included in llama.cpp's device list
-    // ACCEL type is skipped during device enumeration in src/llama.cpp
+    // Return GPU type to be included in llama.cpp's device list
+    // But report limited memory so model weights go to Metal
     return GGML_BACKEND_DEVICE_TYPE_GPU;
     GGML_UNUSED(dev);
 }
@@ -138,28 +131,19 @@ static ggml_backend_buffer_t ggml_backend_ane_device_buffer_from_host_ptr(ggml_b
 static bool ggml_backend_ane_device_supports_op(ggml_backend_dev_t dev, const struct ggml_tensor * op) {
 #ifdef __APPLE__
     #if TARGET_CPU_ARM64
-    // ANE supports specific operations
-    switch (op->op) {
-        case GGML_OP_MUL_MAT:
-            // Matrix multiplication - primary ANE operation
-            return true;
-        case GGML_OP_ADD:
-        case GGML_OP_MUL:
-        case GGML_OP_SOFT_MAX:
-            // Elementwise ops
-            return true;
-        case GGML_OP_RMS_NORM:
-        case GGML_OP_NORM:
-        case GGML_OP_GROUP_NORM:
-            // Normalization
-            return true;
-        case GGML_OP_CONV_2D:
-        case GGML_OP_CONV_3D:
-            // Convolutions (very efficient on ANE)
-            return true;
-        default:
+    // For now, only MUL_MAT is implemented
+    // TODO: Implement ADD, MUL, SOFT_MAX, RMS_NORM
+    if (op->op == GGML_OP_MUL_MAT) {
+        // Check if quantized (ANE only supports FP16/FP32)
+        if (op->src[0] && op->src[0]->type != GGML_TYPE_F32 && op->src[0]->type != GGML_TYPE_F16) {
             return false;
+        }
+        if (op->src[1] && op->src[1]->type != GGML_TYPE_F32 && op->src[1]->type != GGML_TYPE_F16) {
+            return false;
+        }
+        return true;
     }
+    return false;
     #else
     return false;
     #endif
@@ -247,7 +231,7 @@ bool ggml_ane_device_init(void) {
         g_ane_device_ctx.supports_int8 = true;
         
         NSProcessInfo *pi = [NSProcessInfo processInfo];
-        g_ane_device_ctx.memory_size = [pi physicalMemory];
+        g_ane_device_ctx.memory_size = 256 * 1024 * 1024;  // Limited for compute
         
         // Initialize device struct
         g_ane_device.iface = ggml_backend_ane_device_interface;
@@ -259,7 +243,7 @@ bool ggml_ane_device_init(void) {
         // Set the device pointer in the buffer type
         ggml_backend_ane_buffer_type_set_device(&g_ane_device);
         
-        GGML_ANE_LOG_INFO("ANE device initialized: %zu MB unified memory", g_ane_device_ctx.memory_size / (1024 * 1024));
+        GGML_ANE_LOG_INFO("ANE device initialized: 256 MB compute buffer (unified memory access)");
         return true;
     }
     #else

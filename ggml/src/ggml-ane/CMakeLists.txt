@@ -39,6 +39,7 @@ if (BUILD_SHARED_LIBS)
     target_link_libraries(test-ane-matmul PRIVATE ggml-ane)
     target_include_directories(test-ane-matmul PRIVATE 
         ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/..
         ${CMAKE_CURRENT_SOURCE_DIR}
     )
     set_target_properties(test-ane-matmul PROPERTIES

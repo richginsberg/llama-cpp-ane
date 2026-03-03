@@ -101,17 +101,16 @@ static bool ggml_backend_ane_device_supports_op(ggml_backend_dev_t dev, const st
             return true;
         case GGML_OP_ADD:
         case GGML_OP_MUL:
-        case GGML_OP_SILU:
-        case GGML_OP_GELU:
         case GGML_OP_SOFT_MAX:
             // Elementwise ops
             return true;
         case GGML_OP_RMS_NORM:
-        case GGML_OP_LAYER_NORM:
+        case GGML_OP_NORM:
+        case GGML_OP_GROUP_NORM:
             // Normalization
             return true;
-        case GGML_OP_CONV_1D:
         case GGML_OP_CONV_2D:
+        case GGML_OP_CONV_3D:
             // Convolutions (very efficient on ANE)
             return true;
         default:

@@ -91,10 +91,12 @@ set(GGML_BACKEND_DIR "" CACHE PATH "ggml: directory to load dynamic backends fro
 
 if (APPLE)
     set(GGML_METAL_DEFAULT ON)
+    set(GGML_ANE_DEFAULT ON)
     set(GGML_BLAS_DEFAULT ON)
     set(GGML_BLAS_VENDOR_DEFAULT "Apple")
 else()
     set(GGML_METAL_DEFAULT OFF)
+    set(GGML_ANE_DEFAULT OFF)
     set(GGML_BLAS_DEFAULT OFF)
     set(GGML_BLAS_VENDOR_DEFAULT "Generic")
 endif()
@@ -237,6 +239,8 @@ option(GGML_METAL_EMBED_LIBRARY             "ggml: embed Metal library"         
 set   (GGML_METAL_MACOSX_VERSION_MIN "" CACHE STRING
                                             "ggml: metal minimum macOS version")
 set   (GGML_METAL_STD "" CACHE STRING       "ggml: metal standard version (-std flag)")
+option(GGML_ANE                             "ggml: use Apple Neural Engine"                   ${GGML_ANE_DEFAULT})
+option(GGML_ANE_DEBUG                       "ggml: enable ANE debug logging"                  OFF)
 option(GGML_OPENMP                          "ggml: use OpenMP"                                ON)
 option(GGML_RPC                             "ggml: use RPC"                                   OFF)
 option(GGML_SYCL                            "ggml: use SYCL"                                  OFF)

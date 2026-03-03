@@ -1,12 +1,12 @@
 # ANE Backend for llama.cpp - Progress Status
 
 **Started:** 2026-03-02 15:59 EST
-**Last Updated:** 2026-03-02 22:45 EST
+**Last Updated:** 2026-03-03 10:50 EST
 
-## Overall Progress: 35%
+## Overall Progress: 40%
 
 ```
-[███████░░░░░░░░░░░░░] 35%
+[████████░░░░░░░░░░░░] 40%
 ```
 
 ## Phase Progress
@@ -16,110 +16,70 @@
 | Phase 1: Foundation | ✅ Complete | 100% | Backend registers, buffer/device implemented |
 | Phase 2: Runtime Wrapper | ✅ Complete | 100% | Full _ANEClient wrapper with kernel caching |
 | Phase 3: MIL Compiler | ✅ Complete | 100% | MIL generators for all core ops |
-| Phase 4: Graph Execution | 🔄 In Progress | 10% | Op mapping done, graph plan in progress |
-| Phase 5: Integration | ⏳ Pending | 0% | - |
+| Phase 4: Graph Execution | 🔄 In Progress | 20% | Op mapping done, graph plan in progress |
+| Phase 5: Integration | 🔄 In Progress | 10% | CMake integration done |
 
-## Files Created/Updated
+## Build System Integration ✅
 
-### Headers
-- [x] `ggml/include/ggml-ane.h` - Public API
-- [x] `ggml/src/ggml-ane/ggml-ane-impl.h` - Internal structures + runtime API
+- Added `GGML_ANE` option to `ggml/CMakeLists.txt`
+- Added `ggml_add_backend(ANE)` to `ggml/src/CMakeLists.txt`
+- Updated `ggml-ane/CMakeLists.txt` to use `ggml_add_backend_library`
 
-### Implementation
-- [x] `ggml/src/ggml-ane/ggml-ane.cpp` - Backend registration
-- [x] `ggml/src/ggml-ane/ggml-ane-device.mm` - Device management
-- [x] `ggml/src/ggml-ane/ggml-ane-buffer.mm` - IOSurface buffer management
-- [x] `ggml/src/ggml-ane/ggml-ane-runtime.mm` - **Complete _ANEClient wrapper (18KB)**
-- [x] `ggml/src/ggml-ane/ggml-ane-mil.mm` - MIL generation
-- [x] `ggml/src/ggml-ane/ggml-ane-ops.cpp` - Operation mapping
+## Files Modified
 
-### Build & Test
-- [x] `ggml/src/ggml-ane/CMakeLists.txt` - Build configuration
-- [x] `ggml/src/ggml-ane/test-ggml-ane.cpp` - Unit tests
+### Build System
+- [x] `ggml/CMakeLists.txt` - Added GGML_ANE option
+- [x] `ggml/src/CMakeLists.txt` - Added ANE backend registration
+- [x] `ggml/src/ggml-ane/CMakeLists.txt` - Fixed for proper integration
 
-### Documentation
-- [x] `PLAN.md` - Implementation plan
-- [x] `STATUS.md` - This file
+## Current Status
 
-## Current Blockers
+**Build tested on:** MacBook Pro M2 Max, Sequoia 15.7.3
+**Result:** Compiles successfully, Metal backend works
+**Next:** Rebuild with ANE backend enabled
 
-**None** - Ready for Mac M3 testing!
+## Rebuild Instructions
 
-## Runtime Wrapper Features (Phase 2 Complete)
+```bash
+cd /path/to/llama-cpp-ane
 
-✅ **Kernel Lifecycle:**
-- `ggml_ane_compile_kernel()` - Compile MIL + weights → executable kernel
-- `ggml_ane_eval_kernel()` - Execute kernel
-- `ggml_ane_free_kernel()` - Cleanup
+# Clean and rebuild with ANE
+rm -rf build
+cmake -B build -DGGML_ANE=ON
+cmake --build build -j8
 
-✅ **Data Transfer:**
-- `ggml_ane_write_input()` - Write to IOSurface
-- `ggml_ane_read_output()` - Read from IOSurface
-- `ggml_ane_execute()` - One-shot convenience function
+# Check for ANE in available devices
+./build/bin/llama-cli --list-devices
 
-✅ **Kernel Caching:**
-- Hash-based kernel cache
-- Avoids recompilation for identical ops
-- `ggml_ane_clear_cache()` for cleanup
+# Run unit tests
+./build/bin/test-ggml-ane
+```
 
-✅ **Compile Limit Handling:**
-- Tracks compile count
-- Warns at ~100 compiles (limit is ~119)
-- `ggml_ane_needs_restart()` for process restart detection
+## Expected Output
 
-## MIL Generation (Phase 3 Complete)
-
-✅ **Supported Operations:**
-| Operation | MIL Function | Notes |
-|-----------|--------------|-------|
-| `MUL_MAT` | `ggml_ane_gen_mil_conv()` | 1×1 conv (3× faster) |
-| `ADD` | `ggml_ane_gen_mil_add()` | Elementwise |
-| `MUL` | `ggml_ane_gen_mil_mul()` | Elementwise |
-| `SILU` | `ggml_ane_gen_mil_silu()` | Activation |
-| `SOFTMAX` | `ggml_ane_gen_mil_softmax()` | Attention |
-| `RMS_NORM` | `ggml_ane_gen_mil_rms_norm()` | Normalization |
-
-✅ **Weight Blob Builder:**
-- `ggml_ane_build_weight_blob()` - FP32 → FP16 with header
+After rebuild, `--list-devices` should show:
+```
+Available devices:
+MTL0: Apple M2 Max (49152 MiB, ...)
+ANE: Apple Neural Engine
+BLAS: Accelerate (...)
+```
 
 ## Next Steps
 
-1. **Test on Mac M3:**
-   ```bash
-   cd /path/to/llama-cpp-ane
-   cmake -B build -DGGML_ANE=ON
-   cmake --build build -j8
-   ./build/bin/test-ggml-ane
-   ```
-
-2. **Complete Graph Execution (Phase 4):**
-   - Wire up graph plan to use kernels
-   - Implement node scheduling
-   - Handle CPU fallback for unsupported ops
-
-3. **Integration (Phase 5):**
-   - Test with actual model
-   - Benchmark against Metal
-   - KV-cache management
-
-## Metrics
-
-- **Total Lines of Code:** ~4,500
-- **Files Created:** 11
-- **Tests Written:** 5
-- **Tests Passing:** ? (needs Mac testing)
+1. Rebuild on Mac M2 Max with new CMake changes
+2. Verify ANE appears in device list
+3. Run unit tests
+4. Complete Phase 4: Graph execution wiring
 
 ## Change Log
+
+### 2026-03-03 10:50 EST
+- Fixed CMake integration for ANE backend
+- Added GGML_ANE option (default ON for Apple)
+- Backend should now appear in llama-cli --list-devices
 
 ### 2026-03-02 22:45 EST
 - Completed Phase 2: Full _ANEClient wrapper implementation
 - Added kernel caching with hash-based lookup
-- Added compile limit tracking
-- Updated impl header with runtime API declarations
-- Ready for Mac M3 testing
-
-### 2026-03-02 16:02 EST
-- Created project structure
-- Implemented Phase 1 scaffolding
-- Created placeholder implementations for all phases
-- Set up cron job for progress reporting
+- Ready for Mac testing

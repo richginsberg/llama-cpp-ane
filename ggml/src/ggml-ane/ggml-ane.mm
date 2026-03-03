@@ -298,16 +298,85 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
 
 static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, struct ggml_cgraph * cgraph) {
     if (!GGML_ANE_AVAILABLE) {
+        GGML_ANE_LOG_DEBUG("ANE not available on this platform");
         return GGML_STATUS_FAILED;
     }
     
     // Initialize runtime if needed
     if (!ggml_ane_runtime_init()) {
+        GGML_ANE_LOG_DEBUG("ANE runtime init failed");
         return GGML_STATUS_FAILED;
     }
     
-    int ane_ops = 0;
-    int cpu_ops = 0;
+    GGML_ANE_LOG_INFO("ANE graph compute: analyzing %d nodes...", cgraph->n_nodes);
+    
+    int mul_mat_ops = 0;
+    int supported_ops = 0;
+    int unsupported_ops = 0;
+    
+    // Analyze graph first
+    for (int i = 0; i < cgraph->n_nodes; i++) {
+        struct ggml_tensor * node = cgraph->nodes[i];
+        
+        if (node->op == GGML_OP_MUL_MAT) {
+            mul_mat_ops++;
+            
+            // Check why we might not support it
+            if (!node->src[0] || !node->src[1]) {
+                GGML_ANE_LOG_DEBUG("  MUL_MAT %d: missing src tensors", i);
+                unsupported_ops++;
+                continue;
+            }
+            
+            // Check if quantized (ANE only supports FP16/FP32)
+            if (node->src[0]->type != GGML_TYPE_F32 && node->src[0]->type != GGML_TYPE_F16) {
+                GGML_ANE_LOG_DEBUG("  MUL_MAT %d: quantized weights (type=%d), skipping", i, node->src[0]->type);
+                unsupported_ops++;
+                continue;
+            }
+            
+            if (node->src[1]->type != GGML_TYPE_F32 && node->src[1]->type != GGML_TYPE_F16) {
+                GGML_ANE_LOG_DEBUG("  MUL_MAT %d: quantized input (type=%d), skipping", i, node->src[1]->type);
+                unsupported_ops++;
+                continue;
+            }
+            
+            const int64_t ne0 = node->src[0]->ne[0];
+            const int64_t ne1 = node->src[0]->ne[1];
+            const int64_t M = node->src[1]->ne[1];
+            
+            // Skip small matrices
+            if (ne0 * ne1 * M < 64 * 1024) {
+                GGML_ANE_LOG_DEBUG("  MUL_MAT %d: too small (%ldx%ldx%ld), CPU faster", i, ne0, ne1, M);
+                unsupported_ops++;
+                continue;
+            }
+            
+            // Check SRAM limit
+            size_t working_set = ne0 * ne1 * 2 + ne0 * M * 2 + ne1 * M * 2;
+            if (working_set > 64 * 1024 * 1024) {
+                GGML_ANE_LOG_DEBUG("  MUL_MAT %d: too large (%zu MB)", i, working_set / (1024 * 1024));
+                unsupported_ops++;
+                continue;
+            }
+            
+            GGML_ANE_LOG_DEBUG("  MUL_MAT %d: dimensions %ldx%ldx%ld, could use ANE", i, ne0, ne1, M);
+            supported_ops++;
+        } else if (node->op != GGML_OP_NONE) {
+            GGML_ANE_LOG_DEBUG("  Op %d: type=%d, not supported by ANE", i, node->op);
+            unsupported_ops++;
+        }
+    }
+    
+    GGML_ANE_LOG_INFO("ANE graph analysis: %d MUL_MAT, %d could use ANE, %d unsupported", 
+                      mul_mat_ops, supported_ops, unsupported_ops);
+    
+    // If we can't handle all ops, let ggml fall back
+    // (ggml doesn't support hybrid per-op execution across backends)
+    if (unsupported_ops > 0) {
+        GGML_ANE_LOG_INFO("ANE: falling back to CPU/Metal (%d unsupported ops)", unsupported_ops);
+        return GGML_STATUS_FAILED;
+    }
     
     // Process each node
     for (int i = 0; i < cgraph->n_nodes; i++) {
@@ -315,25 +384,20 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
         
         switch (node->op) {
             case GGML_OP_MUL_MAT:
-                // Try to execute on ANE
-                if (ggml_ane_exec_mul_mat(node)) {
-                    ane_ops++;
-                    break;  // Success, move to next node
+                if (!ggml_ane_exec_mul_mat(node)) {
+                    GGML_ANE_LOG_ERROR("ANE: MUL_MAT execution failed");
+                    return GGML_STATUS_FAILED;
                 }
-                // Failed, fall through to CPU
-                cpu_ops++;
-                return GGML_STATUS_FAILED;  // Let ggml fall back to CPU for entire graph
+                break;
                 
             default:
-                // Unsupported op, need CPU fallback
-                cpu_ops++;
+                // Shouldn't reach here if analysis was correct
                 return GGML_STATUS_FAILED;
         }
     }
     
-    GGML_ANE_LOG_DEBUG("ANE graph compute: %d ops on ANE, %d on CPU", ane_ops, cpu_ops);
-    
-    return (cpu_ops == 0) ? GGML_STATUS_SUCCESS : GGML_STATUS_FAILED;
+    GGML_ANE_LOG_INFO("ANE: graph compute complete");
+    return GGML_STATUS_SUCCESS;
     
     GGML_UNUSED(backend);
 }

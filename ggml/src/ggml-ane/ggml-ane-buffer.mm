@@ -234,9 +234,14 @@ static struct ggml_backend_buffer_type_i ggml_backend_ane_buffer_type_interface 
 
 static struct ggml_backend_buffer_type ggml_backend_ane_buffer_type_container = {
     /* .iface   = */ ggml_backend_ane_buffer_type_interface,
-    /* .device  = */ nullptr,
+    /* .device  = */ nullptr,  // Set during device initialization
     /* .context = */ nullptr,
 };
+
+// Called from ggml-ane-device.mm to set the device pointer
+void ggml_backend_ane_buffer_type_set_device(ggml_backend_dev_t dev) {
+    ggml_backend_ane_buffer_type_container.device = dev;
+}
 
 ggml_backend_buffer_type_t ggml_backend_ane_buffer_type(void) {
     return &ggml_backend_ane_buffer_type_container;

@@ -74,10 +74,10 @@ static ggml_backend_t ggml_backend_ane_device_init_backend(ggml_backend_dev_t de
 }
 
 static ggml_backend_buffer_type_t ggml_backend_ane_device_get_buffer_type(ggml_backend_dev_t dev) {
-    // ANE is a compute-only backend - don't store model weights here
-    // Return nullptr to let llama.cpp use CPU/Metal for storage
-    // ANE will still be used for compute via graph execution on unified memory
-    return nullptr;
+    // Return ANE buffer type - allocation will fail for large requests
+    // and llama.cpp will fall back to CPU
+    extern "C" ggml_backend_buffer_type_t ggml_backend_ane_buffer_type(void);
+    return ggml_backend_ane_buffer_type();
     GGML_UNUSED(dev);
 }
 
@@ -213,6 +213,11 @@ bool ggml_ane_device_init(void) {
         g_ane_device.context = &g_ane_device_ctx;
         
         g_ane_device_initialized = true;
+        
+        // Set the device pointer in the buffer type
+        extern void ggml_backend_ane_buffer_type_set_device(ggml_backend_dev_t dev);
+        ggml_backend_ane_buffer_type_set_device(&g_ane_device);
+        
         GGML_ANE_LOG_INFO("ANE device initialized: %zu MB unified memory", g_ane_device_ctx.memory_size / (1024 * 1024));
         return true;
     }

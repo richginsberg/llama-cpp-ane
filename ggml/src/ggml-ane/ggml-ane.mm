@@ -273,51 +273,46 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     }
     
     // Get dimensions
-    // src0 (weights): ne[0] x ne[1] = K x N (or transposed)
-    // src1 (input): ne[0] x ne[1] = K x M (for batch M)
-    // dst (output): ne[0] x ne[1] = N x M
+    // In ggml MUL_MAT: dst = src0^T @ src1
+    // src0: ne[0] x ne[1] x ne[2] x ne[3]
+    // src1: ne[0] x ne[1] x ne[2] x ne[3]
+    // dst:  ne[0] x ne[1] x ne[2] x ne[3]
     
-    const int64_t K = src0->ne[0];
-    const int64_t N = src0->ne[1];
-    const int64_t M = src1->ne[1];
+    const int64_t ne00 = src0->ne[0];  // K
+    const int64_t ne01 = src0->ne[1];  // N
+    const int64_t ne10 = src1->ne[0];  // K (should match ne00)
+    const int64_t ne11 = src1->ne[1];  // M (batch size)
+    const int64_t ne20 = dst->ne[0];   // N
+    const int64_t ne21 = dst->ne[1];   // M
     
-    // Handle transposed weights (common in llama.cpp)
-    // If src0->ne[0] != src1->ne[0], weights might be transposed
-    bool src0_transposed = false;
-    if (src0->ne[0] != src1->ne[0]) {
-        // Check if transposed makes sense
-        if (src0->ne[1] == src1->ne[0]) {
-            src0_transposed = true;
-        }
-    }
+    GGML_ANE_LOG_DEBUG("MUL_MAT dims: src0[%ld,%ld], src1[%ld,%ld], dst[%ld,%ld]",
+                       ne00, ne01, ne10, ne11, ne20, ne21);
     
-    // Adjust dimensions based on transpose
-    int64_t in_ch, out_ch, spatial;
-    if (src0_transposed) {
-        // src0 is [N, K], need to treat as [K, N]
-        in_ch = N;   // K in original terms
-        out_ch = K;  // N in original terms
-    } else {
-        // src0 is [K, N]
-        in_ch = K;
-        out_ch = N;
-    }
-    spatial = M;
+    // For conv-based matmul:
+    // Input [K, M] -> [1, K, 1, M]
+    // Weights [N, K] -> [N, K, 1, 1]
+    // Output [N, M] -> [1, N, 1, M]
+    
+    const int64_t K = ne00;  // Input channels
+    const int64_t N = ne01;  // Output channels
+    const int64_t M = ne11;  // Spatial (batch)
+    
+    GGML_ANE_LOG_DEBUG("Conv dims: in_ch=%ld, out_ch=%ld, spatial=%ld", K, N, M);
     
     // Skip if too small (not worth ANE overhead)
-    if (in_ch * out_ch * spatial < 64 * 1024) {
+    if (K * N * M < 64 * 1024) {
         return false;  // < 64K elements, CPU is faster
     }
     
     // Skip if too large for ANE SRAM (~32MB working set)
-    size_t working_set = in_ch * out_ch * 2 + in_ch * spatial * 2 + out_ch * spatial * 2;
+    size_t working_set = K * N * 2 + K * M * 2 + N * M * 2;
     if (working_set > 64 * 1024 * 1024) {  // 64MB limit (allow some spill)
         GGML_ANE_LOG_DEBUG("MUL_MAT too large for ANE: %zu MB working set", working_set / (1024 * 1024));
         return false;
     }
     
     // Check if we have a cached kernel for these dimensions
-    uint64_t hash = hash_matmul_dims(in_ch, out_ch, spatial);
+    uint64_t hash = hash_matmul_dims(K, N, M);
     
     ggml_ane_kernel_t kernel = nullptr;
     {
@@ -331,37 +326,31 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     // Compile kernel if not cached
     if (!kernel) {
         // Generate MIL for conv-based matmul
-        NSString * mil = ggml_ane_gen_mil_conv(in_ch, out_ch, spatial);
+        // Input: [1, K, 1, M], Weights: [N, K, 1, 1], Output: [1, N, 1, M]
+        NSString * mil = ggml_ane_gen_mil_conv(K, N, M);
         const char * mil_cstr = [mil UTF8String];
         
+        GGML_ANE_LOG_DEBUG("MIL generated for K=%ld, N=%ld, M=%ld", K, N, M);
+        
         // Build weight blob
-        // Weights need to be [out_ch, in_ch] for conv format
-        float * weights_transposed = nullptr;
+        // Weights in src0 are [K, N], need to transpose to [N, K] for conv
         const float * weights = (const float *)src0->data;
+        float * weights_transposed = (float *)malloc(N * K * sizeof(float));
         
-        if (src0_transposed) {
-            // Already [N, K] = [out_ch, in_ch], use directly
-            weights_transposed = nullptr;
-        } else {
-            // Need to transpose from [K, N] to [N, K]
-            weights_transposed = (float *)malloc(out_ch * in_ch * sizeof(float));
-            for (int64_t n = 0; n < out_ch; n++) {
-                for (int64_t k = 0; k < in_ch; k++) {
-                    weights_transposed[n * in_ch + k] = weights[k * out_ch + n];
-                }
+        for (int64_t n = 0; n < N; n++) {
+            for (int64_t k = 0; k < K; k++) {
+                weights_transposed[n * K + k] = weights[k * N + n];
             }
-            weights = weights_transposed;
         }
         
-        NSData * weight_blob = ggml_ane_build_weight_blob(weights, out_ch, in_ch);
-        
-        if (weights_transposed) {
-            free(weights_transposed);
-        }
+        NSData * weight_blob = ggml_ane_build_weight_blob(weights_transposed, N, K);
+        free(weights_transposed);
         
         // Compile
-        size_t input_size = in_ch * spatial * sizeof(float);
-        size_t output_size = out_ch * spatial * sizeof(float);
+        size_t input_size = K * M * sizeof(float);
+        size_t output_size = N * M * sizeof(float);
+        
+        GGML_ANE_LOG_DEBUG("Buffer sizes: input=%zu, output=%zu", input_size, output_size);
         
         kernel = ggml_ane_compile_kernel(
             mil_cstr,
@@ -385,19 +374,18 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     }
     
     // Prepare input data
-    // Input is [K, M] in row-major, ANE expects [1, K, 1, M]
-    float * input_conv = (float *)malloc(in_ch * spatial * sizeof(float));
+    // src1 is [K, M] in row-major, ANE expects [1, K, 1, M]
+    // which means memory layout is [K, M] with K as the fast dimension
+    float * input_conv = (float *)malloc(K * M * sizeof(float));
     const float * src1_data = (const float *)src1->data;
     
-    for (int64_t m = 0; m < spatial; m++) {
-        for (int64_t k = 0; k < in_ch; k++) {
-            // src1 is [K, M] row-major, ANE wants [K, M] but as [1, K, 1, M]
-            input_conv[k * spatial + m] = src1_data[m * in_ch + k];
-        }
-    }
+    // Check if we need to transpose src1
+    // src1 layout: ne[0] = K, so it's [K, M] which is what we need
+    // Just copy directly since it's already in the right layout for [1, K, 1, M]
+    memcpy(input_conv, src1_data, K * M * sizeof(float));
     
     // Allocate output
-    float * output_conv = (float *)malloc(out_ch * spatial * sizeof(float));
+    float * output_conv = (float *)malloc(N * M * sizeof(float));
     
     // Execute
     const void * inputs[1] = { input_conv };
@@ -412,18 +400,15 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
         return false;
     }
     
-    // Convert output back to row-major [N, M]
+    // Copy output to dst
+    // dst is [N, M] row-major, output is [1, N, 1, M] which is [N, M] in memory
     float * dst_data = (float *)dst->data;
-    for (int64_t m = 0; m < spatial; m++) {
-        for (int64_t n = 0; n < out_ch; n++) {
-            // ANE output is [1, N, 1, M], convert to [N, M] row-major
-            dst_data[m * out_ch + n] = output_conv[n * spatial + m];
-        }
-    }
+    memcpy(dst_data, output_conv, N * M * sizeof(float));
     
     free(input_conv);
     free(output_conv);
     
+    GGML_ANE_LOG_DEBUG("MUL_MAT completed successfully");
     return true;
 }
 

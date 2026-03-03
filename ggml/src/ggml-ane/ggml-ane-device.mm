@@ -10,6 +10,10 @@
 extern "C" {
 #endif
 
+// Forward declarations from ggml-ane-buffer.mm
+ggml_backend_buffer_type_t ggml_backend_ane_buffer_type(void);
+void ggml_backend_ane_buffer_type_set_device(ggml_backend_dev_t dev);
+
 // Global device context (non-static for access from ggml-ane.cpp)
 struct ggml_ane_device_context g_ane_device_ctx = {0};
 struct ggml_backend_device g_ane_device = {0};
@@ -76,7 +80,6 @@ static ggml_backend_t ggml_backend_ane_device_init_backend(ggml_backend_dev_t de
 static ggml_backend_buffer_type_t ggml_backend_ane_device_get_buffer_type(ggml_backend_dev_t dev) {
     // Return ANE buffer type - allocation will fail for large requests
     // and llama.cpp will fall back to CPU
-    extern "C" ggml_backend_buffer_type_t ggml_backend_ane_buffer_type(void);
     return ggml_backend_ane_buffer_type();
     GGML_UNUSED(dev);
 }
@@ -215,7 +218,6 @@ bool ggml_ane_device_init(void) {
         g_ane_device_initialized = true;
         
         // Set the device pointer in the buffer type
-        extern void ggml_backend_ane_buffer_type_set_device(ggml_backend_dev_t dev);
         ggml_backend_ane_buffer_type_set_device(&g_ane_device);
         
         GGML_ANE_LOG_INFO("ANE device initialized: %zu MB unified memory", g_ane_device_ctx.memory_size / (1024 * 1024));

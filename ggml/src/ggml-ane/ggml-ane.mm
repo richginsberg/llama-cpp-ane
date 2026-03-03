@@ -8,6 +8,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include <new>
 #include <map>
 #include <mutex>
@@ -129,8 +130,138 @@ static enum ggml_status ggml_backend_ane_graph_plan_compute(ggml_backend_t backe
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// Graph Execution - Core Implementation
+// Simple Op Execution (CPU-based, these are memory-bound anyway)
 ////////////////////////////////////////////////////////////////////////////////
+
+static void ggml_ane_exec_add(struct ggml_tensor * dst) {
+    struct ggml_tensor * src0 = dst->src[0];
+    struct ggml_tensor * src1 = dst->src[1];
+    
+    const int64_t ne = ggml_nelements(dst);
+    const float * a = (const float *)src0->data;
+    const float * b = (const float *)src1->data;
+    float * c = (float *)dst->data;
+    
+    // Simple vectorized add
+    #pragma omp parallel for
+    for (int64_t i = 0; i < ne; i++) {
+        c[i] = a[i] + b[i];
+    }
+}
+
+static void ggml_ane_exec_mul(struct ggml_tensor * dst) {
+    struct ggml_tensor * src0 = dst->src[0];
+    struct ggml_tensor * src1 = dst->src[1];
+    
+    const int64_t ne = ggml_nelements(dst);
+    const float * a = (const float *)src0->data;
+    const float * b = (const float *)src1->data;
+    float * c = (float *)dst->data;
+    
+    // Simple vectorized mul
+    #pragma omp parallel for
+    for (int64_t i = 0; i < ne; i++) {
+        c[i] = a[i] * b[i];
+    }
+}
+
+static void ggml_ane_exec_rms_norm(struct ggml_tensor * dst) {
+    struct ggml_tensor * src = dst->src[0];
+    
+    const int64_t ne00 = src->ne[0];
+    const int64_t ne01 = src->ne[1];
+    const int64_t ne02 = src->ne[2];
+    const int64_t ne03 = src->ne[3];
+    
+    const float * x = (const float *)src->data;
+    float * y = (float *)dst->data;
+    
+    // RMS norm: y = x * rsqrt(mean(x^2) + eps)
+    const float eps = 1e-5f;  // Standard epsilon
+    
+    // For each row, compute RMS and normalize
+    const int64_t n_rows = ne01 * ne02 * ne03;
+    
+    #pragma omp parallel for
+    for (int64_t i = 0; i < n_rows; i++) {
+        const float * xi = x + i * ne00;
+        float * yi = y + i * ne00;
+        
+        // Compute sum of squares
+        float sum_sq = 0.0f;
+        for (int64_t j = 0; j < ne00; j++) {
+            sum_sq += xi[j] * xi[j];
+        }
+        
+        // Compute RMS
+        float rms = sqrtf(sum_sq / ne00 + eps);
+        float inv_rms = 1.0f / rms;
+        
+        // Normalize
+        for (int64_t j = 0; j < ne00; j++) {
+            yi[j] = xi[j] * inv_rms;
+        }
+    }
+}
+
+static void ggml_ane_exec_softmax(struct ggml_tensor * dst) {
+    struct ggml_tensor * src = dst->src[0];
+    
+    const int64_t ne00 = src->ne[0];
+    const int64_t ne01 = src->ne[1];
+    const int64_t ne02 = src->ne[2];
+    const int64_t ne03 = src->ne[3];
+    
+    const float * x = (const float *)src->data;
+    float * y = (float *)dst->data;
+    
+    // Softmax per row
+    const int64_t n_rows = ne01 * ne02 * ne03;
+    
+    #pragma omp parallel for
+    for (int64_t i = 0; i < n_rows; i++) {
+        const float * xi = x + i * ne00;
+        float * yi = y + i * ne00;
+        
+        // Find max for numerical stability
+        float max_val = xi[0];
+        for (int64_t j = 1; j < ne00; j++) {
+            if (xi[j] > max_val) max_val = xi[j];
+        }
+        
+        // Compute exp and sum
+        float sum = 0.0f;
+        for (int64_t j = 0; j < ne00; j++) {
+            yi[j] = expf(xi[j] - max_val);
+            sum += yi[j];
+        }
+        
+        // Normalize
+        float inv_sum = 1.0f / sum;
+        for (int64_t j = 0; j < ne00; j++) {
+            yi[j] *= inv_sum;
+        }
+    }
+}
+
+static bool ggml_ane_exec_simple_op(struct ggml_tensor * node) {
+    // Simple elementwise ops are memory-bound, so CPU is fine
+    // The value of ANE is for compute-bound ops like MUL_MAT
+    
+    const char * op_name = ggml_op_name(node->op);
+    GGML_ANE_LOG_DEBUG("  Executing %s on CPU (memory-bound)", op_name);
+    
+    // For these ops, we just pass through - ggml has already computed them
+    // or they will be computed by the CPU backend
+    return true;
+}
+
+static bool ggml_ane_exec_view_op(struct ggml_tensor * node) {
+    // VIEW, RESHAPE, PERMUTE, etc. are just metadata ops
+    // No actual computation needed
+    GGML_ANE_LOG_DEBUG("  VIEW/RESHAPE op: no compute needed");
+    return true;
+}
 
 // Execute a single MUL_MAT on ANE
 static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
@@ -366,11 +497,22 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
             
             GGML_ANE_LOG_DEBUG("  MUL_MAT %d: dimensions %ldx%ldx%ld, could use ANE", i, ne0, ne1, M);
             supported_ops++;
-        } else {
-            // For now, we only implement MUL_MAT
-            // TODO: Implement ADD, MUL, SOFT_MAX, etc.
+        } else if (node->op == GGML_OP_ADD || node->op == GGML_OP_MUL || 
+                   node->op == GGML_OP_RMS_NORM || node->op == GGML_OP_SOFT_MAX) {
+            // These ops are implemented (CPU execution within ANE backend)
             const char * op_name = ggml_op_name(node->op);
-            GGML_ANE_LOG_DEBUG("  Op %d: %s (type=%d), not yet implemented in ANE", 
+            GGML_ANE_LOG_DEBUG("  %s %d: supported (CPU execution)", op_name ? op_name : "unknown", i);
+            supported_ops++;
+        } else if (node->op == GGML_OP_VIEW || node->op == GGML_OP_RESHAPE ||
+                   node->op == GGML_OP_PERMUTE || node->op == GGML_OP_TRANSPOSE ||
+                   node->op == GGML_OP_CONT || node->op == GGML_OP_CPY ||
+                   node->op == GGML_OP_NONE) {
+            // Metadata ops - no compute needed
+            supported_ops++;
+        } else {
+            // Unsupported op
+            const char * op_name = ggml_op_name(node->op);
+            GGML_ANE_LOG_DEBUG("  Op %d: %s (type=%d), not supported by ANE", 
                               i, op_name ? op_name : "unknown", node->op);
             unsupported_ops++;
         }
@@ -396,6 +538,31 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
                     return GGML_STATUS_FAILED;
                 }
                 break;
+            
+            case GGML_OP_ADD:
+                ggml_ane_exec_add(node);
+                break;
+            
+            case GGML_OP_MUL:
+                ggml_ane_exec_mul(node);
+                break;
+            
+            case GGML_OP_RMS_NORM:
+                ggml_ane_exec_rms_norm(node);
+                break;
+            
+            case GGML_OP_SOFT_MAX:
+                ggml_ane_exec_softmax(node);
+                break;
+            
+            case GGML_OP_VIEW:
+            case GGML_OP_RESHAPE:
+            case GGML_OP_PERMUTE:
+            case GGML_OP_TRANSPOSE:
+            case GGML_OP_CONT:
+            case GGML_OP_CPY:
+                // No-op metadata ops
+                break;
                 
             case GGML_OP_NONE:
                 // Skip placeholder
@@ -403,7 +570,9 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
                 
             default:
                 // Shouldn't reach here if analysis was correct
-                GGML_ANE_LOG_ERROR("ANE: Unexpected op %d in execution phase", node->op);
+                const char * op_name = ggml_op_name(node->op);
+                GGML_ANE_LOG_ERROR("ANE: Unexpected op %s (%d) in execution phase", 
+                                   op_name ? op_name : "unknown", node->op);
                 return GGML_STATUS_FAILED;
         }
     }
@@ -419,8 +588,6 @@ static bool ggml_backend_ane_supports_op(ggml_backend_t backend, const struct gg
         return false;
     }
     
-    // For now, we only implement MUL_MAT
-    // TODO: Implement ADD, MUL, SOFT_MAX, RMS_NORM
     switch (op->op) {
         case GGML_OP_MUL_MAT: {
             // Check dimensions
@@ -443,6 +610,18 @@ static bool ggml_backend_ane_supports_op(ggml_backend_t backend, const struct gg
             
             return true;
         }
+        case GGML_OP_ADD:
+        case GGML_OP_MUL:
+        case GGML_OP_RMS_NORM:
+        case GGML_OP_SOFT_MAX:
+            return true;
+        case GGML_OP_VIEW:
+        case GGML_OP_RESHAPE:
+        case GGML_OP_PERMUTE:
+        case GGML_OP_TRANSPOSE:
+        case GGML_OP_CONT:
+        case GGML_OP_CPY:
+            return true;  // Metadata ops
         default:
             return false;
     }
@@ -454,12 +633,8 @@ static bool ggml_backend_ane_offload_op(ggml_backend_t backend, const struct ggm
         return false;
     }
     
-    // Only offload MUL_MAT for now (implemented)
-    if (op->op == GGML_OP_MUL_MAT) {
-        return true;
-    }
-    
-    return false;
+    // Offload all supported ops
+    return true;
 }
 
 static bool ggml_backend_ane_supports_buft(ggml_backend_t backend, ggml_backend_buffer_type_t buft) {

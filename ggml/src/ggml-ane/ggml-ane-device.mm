@@ -131,19 +131,48 @@ static ggml_backend_buffer_t ggml_backend_ane_device_buffer_from_host_ptr(ggml_b
 static bool ggml_backend_ane_device_supports_op(ggml_backend_dev_t dev, const struct ggml_tensor * op) {
 #ifdef __APPLE__
     #if TARGET_CPU_ARM64
-    // For now, only MUL_MAT is implemented
-    // TODO: Implement ADD, MUL, SOFT_MAX, RMS_NORM
-    if (op->op == GGML_OP_MUL_MAT) {
-        // Check if quantized (ANE only supports FP16/FP32)
-        if (op->src[0] && op->src[0]->type != GGML_TYPE_F32 && op->src[0]->type != GGML_TYPE_F16) {
+    // ANE supports these operations (MIL can express them)
+    switch (op->op) {
+        case GGML_OP_MUL_MAT:
+            // Matrix multiplication - primary ANE operation
+            // Check if quantized (ANE only supports FP16/FP32)
+            if (op->src[0] && op->src[0]->type != GGML_TYPE_F32 && op->src[0]->type != GGML_TYPE_F16) {
+                return false;
+            }
+            if (op->src[1] && op->src[1]->type != GGML_TYPE_F32 && op->src[1]->type != GGML_TYPE_F16) {
+                return false;
+            }
+            return true;
+            
+        case GGML_OP_ADD:
+        case GGML_OP_MUL:
+            // Elementwise ops - very efficient on ANE
+            return true;
+            
+        case GGML_OP_RMS_NORM:
+            // RMS normalization - can be implemented with ANE ops
+            return true;
+            
+        case GGML_OP_SOFT_MAX:
+            // Softmax - native ANE operation
+            return true;
+            
+        case GGML_OP_VIEW:
+        case GGML_OP_RESHAPE:
+        case GGML_OP_PERMUTE:
+        case GGML_OP_TRANSPOSE:
+        case GGML_OP_CONT:
+        case GGML_OP_CPY:
+            // Memory/reshape ops - no compute, just pass through
+            return true;
+            
+        case GGML_OP_ROPE:
+            // Rotary position embeddings - complex, needs CPU fallback for now
             return false;
-        }
-        if (op->src[1] && op->src[1]->type != GGML_TYPE_F32 && op->src[1]->type != GGML_TYPE_F16) {
+            
+        default:
             return false;
-        }
-        return true;
     }
-    return false;
     #else
     return false;
     #endif

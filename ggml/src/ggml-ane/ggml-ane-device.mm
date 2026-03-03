@@ -50,8 +50,9 @@ static void ggml_backend_ane_device_get_memory(ggml_backend_dev_t dev, size_t * 
 }
 
 static enum ggml_backend_dev_type ggml_backend_ane_device_get_type(ggml_backend_dev_t dev) {
-    // ANE is an accelerator device (like BLAS/AMX)
-    return GGML_BACKEND_DEVICE_TYPE_ACCEL;
+    // Must return GPU type to be included in llama.cpp's device list
+    // ACCEL type is skipped during device enumeration in src/llama.cpp
+    return GGML_BACKEND_DEVICE_TYPE_GPU;
     GGML_UNUSED(dev);
 }
 

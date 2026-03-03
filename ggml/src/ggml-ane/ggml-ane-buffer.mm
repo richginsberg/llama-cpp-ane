@@ -53,12 +53,13 @@ static void ggml_backend_ane_buffer_free_buffer(ggml_backend_buffer_t buffer) {
     if (ctx) {
 #ifdef __APPLE__
         if (ctx->surface) {
-            // Remove from tracking map
-            {
-                std::lock_guard<std::mutex> lock(g_surface_map_mutex);
-                g_surface_map.erase(ctx->base);
-            }
+            // IOSurface-backed buffer
+            std::lock_guard<std::mutex> lock(g_surface_map_mutex);
+            g_surface_map.erase(ctx->base);
             CFRelease(ctx->surface);
+        } else if (ctx->base) {
+            // Unified memory buffer (malloc'd)
+            free(ctx->base);
         }
 #endif
         delete ctx;
@@ -110,51 +111,19 @@ static const char * ggml_backend_ane_buffer_type_get_name(ggml_backend_buffer_ty
 
 static ggml_backend_buffer_t ggml_backend_ane_buffer_type_alloc_buffer(ggml_backend_buffer_type_t buft, size_t size) {
 #ifdef __APPLE__
-    // Reject large allocations - ANE is for compute, not storage
-    // Model weights should go to CPU/Metal
-    const size_t max_buffer_size = 256ULL * 1024ULL * 1024ULL;  // 256MB
-    if (size > max_buffer_size) {
-        GGML_ANE_LOG_DEBUG("Rejecting large buffer allocation: %zu MB (max %zu MB) - use CPU/Metal for model weights",
-                          size / (1024 * 1024), max_buffer_size / (1024 * 1024));
-        return nullptr;  // Return nullptr to trigger fallback
-    }
-    
     @autoreleasepool {
-        // Align to page boundary for IOSurface
+        // Align to page boundary
         size_t aligned_size = (size + 4095) & ~4095;
         
-        // Create IOSurface descriptor
-        NSDictionary *surfaceDict = @{
-            (id)kIOSurfaceWidth: @1,
-            (id)kIOSurfaceHeight: @1,
-            (id)kIOSurfaceBytesPerElement: @(aligned_size),
-            (id)kIOSurfaceBytesPerRow: @(aligned_size),
-            (id)kIOSurfaceAllocSize: @(aligned_size),
-            (id)kIOSurfacePixelFormat: @(0)
-        };
-        
-        IOSurfaceRef surface = IOSurfaceCreate((__bridge CFDictionaryRef)surfaceDict);
-        if (!surface) {
-            GGML_ANE_LOG_ERROR("Failed to create IOSurface of size %zu", aligned_size);
-            return nullptr;
-        }
-        
-        // Lock and get base address
-        IOReturn lockResult = IOSurfaceLock(surface, 0, NULL);
-        if (lockResult != kIOReturnSuccess) {
-            CFRelease(surface);
-            GGML_ANE_LOG_ERROR("Failed to lock IOSurface");
-            return nullptr;
-        }
-        
-        void * base = IOSurfaceGetBaseAddress(surface);
-        IOSurfaceUnlock(surface, 0, NULL);
-        
+        // Use regular malloc for unified memory (not IOSurface)
+        // IOSurface is only needed for ANE compute operations
+        // For model weights, unified memory via malloc is sufficient
+        void * base = aligned_alloc(4096, aligned_size);
         if (!base) {
-            CFRelease(surface);
-            GGML_ANE_LOG_ERROR("Failed to get IOSurface base address");
+            GGML_ANE_LOG_ERROR("Failed to allocate buffer of size %zu", aligned_size);
             return nullptr;
         }
+        memset(base, 0, aligned_size);
         
         // Create buffer context
         ggml_ane_buffer_context * ctx = new ggml_ane_buffer_context();
@@ -162,27 +131,17 @@ static ggml_backend_buffer_t ggml_backend_ane_buffer_type_alloc_buffer(ggml_back
         ctx->base = base;
         ctx->size = size;
         ctx->allocated_size = aligned_size;
-        ctx->surface = surface;
+        ctx->surface = nullptr;  // No IOSurface, using unified memory
         
-        // Track surface for cleanup
-        {
-            std::lock_guard<std::mutex> lock(g_surface_map_mutex);
-            g_surface_map[base] = surface;
-        }
-        
-        // Create buffer using the interface (now defined above)
+        // Create buffer
         ggml_backend_buffer_t buffer = ggml_backend_buffer_init(buft, ggml_backend_ane_buffer_interface, ctx, size);
         if (!buffer) {
             delete ctx;
-            {
-                std::lock_guard<std::mutex> lock(g_surface_map_mutex);
-                g_surface_map.erase(base);
-            }
-            CFRelease(surface);
+            free(base);
             return nullptr;
         }
         
-        GGML_ANE_LOG_DEBUG("Allocated ANE buffer: %zu bytes (aligned: %zu)", size, aligned_size);
+        GGML_ANE_LOG_DEBUG("Allocated ANE buffer: %zu bytes (unified memory)", size);
         return buffer;
     }
 #else
@@ -200,10 +159,8 @@ static size_t ggml_backend_ane_buffer_type_get_alignment(ggml_backend_buffer_typ
 }
 
 static size_t ggml_backend_ane_buffer_type_get_max_size(ggml_backend_buffer_type_t buft) {
-    // ANE is for compute, not storage. Limit buffer size to 256MB.
-    // Larger allocations should go to CPU/Metal.
-    // This prevents trying to load entire models into ANE memory.
-    return 256ULL * 1024ULL * 1024ULL;  // 256MB max
+    // Unified memory can handle large allocations
+    return 4ULL * 1024ULL * 1024ULL * 1024ULL;  // 4GB max
     GGML_UNUSED(buft);
 }
 

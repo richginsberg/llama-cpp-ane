@@ -79,8 +79,7 @@ static ggml_backend_t ggml_backend_ane_device_init_backend(ggml_backend_dev_t de
 }
 
 static ggml_backend_buffer_type_t ggml_backend_ane_device_get_buffer_type(ggml_backend_dev_t dev) {
-    // Return ANE buffer type - allocation will fail for large requests
-    // and llama.cpp will fall back to CPU
+    // Return ANE buffer type - uses unified memory (regular malloc)
     return ggml_backend_ane_buffer_type();
     GGML_UNUSED(dev);
 }

@@ -15,6 +15,11 @@
 #include <mutex>
 #include <vector>
 
+// Enable C linkage for functions called from .cpp files
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Private framework class references
 static Class g_ANEDesc = nil;
 static Class g_ANEInMem = nil;
@@ -517,3 +522,7 @@ int ggml_ane_get_kernel_input_count(ggml_ane_kernel_t kernel) {
 int ggml_ane_get_kernel_output_count(ggml_ane_kernel_t kernel) {
     return kernel ? kernel->nOutputs : 0;
 }
+
+#ifdef __cplusplus
+}
+#endif

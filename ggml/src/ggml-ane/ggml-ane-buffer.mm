@@ -9,6 +9,11 @@
 #include <map>
 #include <mutex>
 
+// Enable C linkage for functions called from .cpp files
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Track IOSurface references for buffer management
 static std::map<void *, IOSurfaceRef> g_surface_map;
 static std::mutex g_surface_map_mutex;
@@ -285,3 +290,7 @@ void ggml_ane_buffer_free(void * ptr) {
         g_surface_map.erase(it);
     }
 }
+
+#ifdef __cplusplus
+}
+#endif

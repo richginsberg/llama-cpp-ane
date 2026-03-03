@@ -32,3 +32,13 @@ target_compile_options(ggml-ane PRIVATE
 if (GGML_ANE_DEBUG)
     target_compile_definitions(ggml-ane PRIVATE GGML_ANE_DEBUG)
 endif()
+
+# Simple matmul test
+if (GGML_BUILD_TESTS)
+    add_executable(test-ane-matmul
+        test-ane-matmul.cpp
+    )
+    target_link_libraries(test-ane-matmul PRIVATE ggml-ane)
+    target_include_directories(test-ane-matmul PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+    add_test(NAME test-ane-matmul COMMAND test-ane-matmul)
+endif()

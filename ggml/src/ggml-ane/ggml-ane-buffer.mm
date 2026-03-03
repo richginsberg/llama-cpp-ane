@@ -14,6 +14,87 @@ static std::map<void *, IOSurfaceRef> g_surface_map;
 static std::mutex g_surface_map_mutex;
 
 ////////////////////////////////////////////////////////////////////////////////
+// Forward declarations
+////////////////////////////////////////////////////////////////////////////////
+
+static void ggml_backend_ane_buffer_free_buffer(ggml_backend_buffer_t buffer);
+static void * ggml_backend_ane_buffer_get_base(ggml_backend_buffer_t buffer);
+static void ggml_backend_ane_buffer_set_tensor(ggml_backend_buffer_t buffer, struct ggml_tensor * tensor, const void * data, size_t offset, size_t size);
+static void ggml_backend_ane_buffer_get_tensor(ggml_backend_buffer_t buffer, const struct ggml_tensor * tensor, void * data, size_t offset, size_t size);
+static void ggml_backend_ane_buffer_clear(ggml_backend_buffer_t buffer, uint8_t value);
+
+////////////////////////////////////////////////////////////////////////////////
+// Buffer Interface (must be defined before use)
+////////////////////////////////////////////////////////////////////////////////
+
+static struct ggml_backend_buffer_i ggml_backend_ane_buffer_interface = {
+    /* .free_buffer   = */ ggml_backend_ane_buffer_free_buffer,
+    /* .get_base      = */ ggml_backend_ane_buffer_get_base,
+    /* .init_tensor   = */ NULL,
+    /* .memset_tensor = */ NULL,
+    /* .set_tensor    = */ ggml_backend_ane_buffer_set_tensor,
+    /* .get_tensor    = */ ggml_backend_ane_buffer_get_tensor,
+    /* .cpy_tensor    = */ NULL,
+    /* .clear         = */ ggml_backend_ane_buffer_clear,
+    /* .reset         = */ NULL,
+};
+
+////////////////////////////////////////////////////////////////////////////////
+// Buffer Interface Implementation
+////////////////////////////////////////////////////////////////////////////////
+
+static void ggml_backend_ane_buffer_free_buffer(ggml_backend_buffer_t buffer) {
+    ggml_ane_buffer_context * ctx = (ggml_ane_buffer_context *)buffer->context;
+    if (ctx) {
+#ifdef __APPLE__
+        if (ctx->surface) {
+            // Remove from tracking map
+            {
+                std::lock_guard<std::mutex> lock(g_surface_map_mutex);
+                g_surface_map.erase(ctx->base);
+            }
+            CFRelease(ctx->surface);
+        }
+#endif
+        delete ctx;
+    }
+}
+
+static void * ggml_backend_ane_buffer_get_base(ggml_backend_buffer_t buffer) {
+    ggml_ane_buffer_context * ctx = (ggml_ane_buffer_context *)buffer->context;
+    return ctx ? ctx->base : nullptr;
+}
+
+static void ggml_backend_ane_buffer_set_tensor(ggml_backend_buffer_t buffer, struct ggml_tensor * tensor, const void * data, size_t offset, size_t size) {
+    ggml_ane_buffer_context * ctx = (ggml_ane_buffer_context *)buffer->context;
+    if (ctx && ctx->base) {
+        // Calculate the offset into the buffer
+        char * base_ptr = (char *)ctx->base;
+        char * tensor_ptr = (char *)tensor->data;
+        size_t buffer_offset = tensor_ptr - base_ptr;
+        memcpy(base_ptr + buffer_offset + offset, data, size);
+    }
+}
+
+static void ggml_backend_ane_buffer_get_tensor(ggml_backend_buffer_t buffer, const struct ggml_tensor * tensor, void * data, size_t offset, size_t size) {
+    ggml_ane_buffer_context * ctx = (ggml_ane_buffer_context *)buffer->context;
+    if (ctx && ctx->base) {
+        // Calculate the offset into the buffer
+        char * base_ptr = (char *)ctx->base;
+        char * tensor_ptr = (char *)tensor->data;
+        size_t buffer_offset = tensor_ptr - base_ptr;
+        memcpy(data, base_ptr + buffer_offset + offset, size);
+    }
+}
+
+static void ggml_backend_ane_buffer_clear(ggml_backend_buffer_t buffer, uint8_t value) {
+    ggml_ane_buffer_context * ctx = (ggml_ane_buffer_context *)buffer->context;
+    if (ctx && ctx->base) {
+        memset(ctx->base, value, ctx->size);
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // Buffer Type Interface
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -75,7 +156,7 @@ static ggml_backend_buffer_t ggml_backend_ane_buffer_type_alloc_buffer(ggml_back
             g_surface_map[base] = surface;
         }
         
-        // Create buffer using the interface
+        // Create buffer using the interface (now defined above)
         ggml_backend_buffer_t buffer = ggml_backend_buffer_init(buft, ggml_backend_ane_buffer_interface, ctx, size);
         if (!buffer) {
             delete ctx;
@@ -124,96 +205,8 @@ static bool ggml_backend_ane_buffer_type_is_host(ggml_backend_buffer_type_t buft
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// Buffer Interface
-////////////////////////////////////////////////////////////////////////////////
-
-static void ggml_backend_ane_buffer_free_buffer(ggml_backend_buffer_t buffer) {
-    ggml_ane_buffer_context * ctx = (ggml_ane_buffer_context *)buffer->context;
-    if (ctx) {
-#ifdef __APPLE__
-        if (ctx->surface) {
-            // Remove from tracking map
-            {
-                std::lock_guard<std::mutex> lock(g_surface_map_mutex);
-                g_surface_map.erase(ctx->base);
-            }
-            CFRelease(ctx->surface);
-        }
-#endif
-        delete ctx;
-    }
-}
-
-static void * ggml_backend_ane_buffer_get_base(ggml_backend_buffer_t buffer) {
-    ggml_ane_buffer_context * ctx = (ggml_ane_buffer_context *)buffer->context;
-    return ctx ? ctx->base : nullptr;
-}
-
-static void ggml_backend_ane_buffer_set_tensor(ggml_backend_buffer_t buffer, struct ggml_tensor * tensor, const void * data, size_t offset, size_t size) {
-    ggml_ane_buffer_context * ctx = (ggml_ane_buffer_context *)buffer->context;
-    if (ctx && ctx->base) {
-        // Calculate the offset into the buffer
-        char * base_ptr = (char *)ctx->base;
-        char * tensor_ptr = (char *)tensor->data;
-        size_t buffer_offset = tensor_ptr - base_ptr;
-        memcpy(base_ptr + buffer_offset + offset, data, size);
-    }
-}
-
-static void ggml_backend_ane_buffer_get_tensor(ggml_backend_buffer_t buffer, const struct ggml_tensor * tensor, void * data, size_t offset, size_t size) {
-    ggml_ane_buffer_context * ctx = (ggml_ane_buffer_context *)buffer->context;
-    if (ctx && ctx->base) {
-        // Calculate the offset into the buffer
-        char * base_ptr = (char *)ctx->base;
-        char * tensor_ptr = (char *)tensor->data;
-        size_t buffer_offset = tensor_ptr - base_ptr;
-        memcpy(data, base_ptr + buffer_offset + offset, size);
-    }
-}
-
-static void ggml_backend_ane_buffer_clear(ggml_backend_buffer_t buffer, uint8_t value) {
-    ggml_ane_buffer_context * ctx = (ggml_ane_buffer_context *)buffer->context;
-    if (ctx && ctx->base) {
-        memset(ctx->base, value, ctx->size);
-    }
-}
-
-////////////////////////////////////////////////////////////////////////////////
 // Buffer Type Registration
 ////////////////////////////////////////////////////////////////////////////////
-
-// Buffer interface functions
-static void ggml_backend_ane_buffer_free_wrapper(ggml_backend_buffer_t buffer) {
-    ggml_backend_ane_buffer_free_buffer(buffer);
-}
-
-static void * ggml_backend_ane_buffer_get_base_wrapper(ggml_backend_buffer_t buffer) {
-    return ggml_backend_ane_buffer_get_base(buffer);
-}
-
-static void ggml_backend_ane_buffer_set_tensor_wrapper(ggml_backend_buffer_t buffer, struct ggml_tensor * tensor, const void * data, size_t offset, size_t size) {
-    ggml_backend_ane_buffer_set_tensor(buffer, tensor, data, offset, size);
-}
-
-static void ggml_backend_ane_buffer_get_tensor_wrapper(ggml_backend_buffer_t buffer, const struct ggml_tensor * tensor, void * data, size_t offset, size_t size) {
-    ggml_backend_ane_buffer_get_tensor(buffer, tensor, data, offset, size);
-}
-
-static void ggml_backend_ane_buffer_clear_wrapper(ggml_backend_buffer_t buffer, uint8_t value) {
-    ggml_backend_ane_buffer_clear(buffer, value);
-}
-
-static struct ggml_backend_buffer_i ggml_backend_ane_buffer_interface = {
-    /* .free_buffer   = */ ggml_backend_ane_buffer_free_wrapper,
-    /* .get_base      = */ ggml_backend_ane_buffer_get_base_wrapper,
-    /* .init_tensor   = */ NULL,
-    /* .memset_tensor = */ NULL,
-    /* .set_tensor    = */ ggml_backend_ane_buffer_set_tensor_wrapper,
-    /* .get_tensor    = */ ggml_backend_ane_buffer_get_tensor_wrapper,
-    /* .cpy_tensor    = */ NULL,
-    /* .clear         = */ ggml_backend_ane_buffer_clear_wrapper,
-    /* .reset         = */ NULL,
-};
 
 static struct ggml_backend_buffer_type_i ggml_backend_ane_buffer_type_interface = {
     /* .get_name      = */ ggml_backend_ane_buffer_type_get_name,

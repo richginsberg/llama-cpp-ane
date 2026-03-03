@@ -314,8 +314,6 @@ ggml_ane_kernel_t ggml_ane_compile_kernel(
             return nullptr;
         }
         
-        kernel->request = request;
-        
         // Cache if hash provided
         if (hash != 0) {
             std::lock_guard<std::mutex> lock(g_kernel_cache_mutex);

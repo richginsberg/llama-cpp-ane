@@ -34,7 +34,8 @@ static void ggml_backend_ane_buffer_clear(ggml_backend_buffer_t buffer, uint8_t 
 // Buffer Interface (must be defined before use)
 ////////////////////////////////////////////////////////////////////////////////
 
-static struct ggml_backend_buffer_i ggml_backend_ane_buffer_interface = {
+// Non-static so it can be used in ggml-ane-device.mm for buffer_from_host_ptr
+struct ggml_backend_buffer_i ggml_backend_ane_buffer_interface = {
     /* .free_buffer   = */ ggml_backend_ane_buffer_free_buffer,
     /* .get_base      = */ ggml_backend_ane_buffer_get_base,
     /* .init_tensor   = */ NULL,

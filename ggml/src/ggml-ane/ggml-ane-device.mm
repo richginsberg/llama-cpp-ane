@@ -3,9 +3,9 @@
 
 #import <Foundation/Foundation.h>
 #include "ggml-ane-impl.h"
+#include "ggml-backend-impl.h"
 #include <string.h>
 
-// Wrap function definitions in extern "C" to match header declarations
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -14,10 +14,25 @@ extern "C" {
 ggml_backend_buffer_type_t ggml_backend_ane_buffer_type(void);
 void ggml_backend_ane_buffer_type_set_device(ggml_backend_dev_t dev);
 
+#ifdef __cplusplus
+}
+#endif
+
+// Buffer interface (defined in ggml-ane-buffer.mm) - C++ struct
+extern struct ggml_backend_buffer_i ggml_backend_ane_buffer_interface;
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Global device context (non-static for access from ggml-ane.cpp)
 struct ggml_ane_device_context g_ane_device_ctx = {0};
 struct ggml_backend_device g_ane_device = {0};
 bool g_ane_device_initialized = false;
+
+#ifdef __cplusplus
+}
+#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 // Device Interface Implementation
@@ -211,6 +226,10 @@ static struct ggml_backend_device_i ggml_backend_ane_device_interface = {
 ////////////////////////////////////////////////////////////////////////////////
 // Public API
 ////////////////////////////////////////////////////////////////////////////////
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 bool ggml_ane_device_init(void) {
     if (g_ane_device_initialized) {

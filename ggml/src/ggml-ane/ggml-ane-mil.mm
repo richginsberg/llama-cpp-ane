@@ -6,6 +6,11 @@
 #include <math.h>
 #include <string.h>
 
+// Wrap function definitions in extern "C" to match header declarations
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Build FP16 weight blob with header structure
 // weights_f32: source weights in row-major [out_ch, in_ch]
 NSData * ggml_ane_build_weight_blob(const float * weights_f32, int out_ch, int in_ch) {
@@ -178,3 +183,7 @@ char * ggml_ane_mil_to_cstring(NSString * mil) {
     memcpy(result, utf8, len);
     return result;
 }
+
+#ifdef __cplusplus
+}
+#endif

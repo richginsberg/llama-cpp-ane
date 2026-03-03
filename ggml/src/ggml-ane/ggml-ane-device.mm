@@ -5,6 +5,11 @@
 #include "ggml-ane-impl.h"
 #include <string.h>
 
+// Wrap function definitions in extern "C" to match header declarations
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Global device context
 static struct ggml_ane_device_context g_ane_device_ctx = {0};
 static struct ggml_backend_device g_ane_device = {0};
@@ -254,3 +259,7 @@ ggml_backend_dev_t ggml_backend_ane_get_device(int index) {
 ggml_backend_dev_t ggml_backend_ane_device_get(void) {
     return ggml_backend_ane_get_device(0);
 }
+
+#ifdef __cplusplus
+}
+#endif

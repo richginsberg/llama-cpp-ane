@@ -30,9 +30,5 @@ target_compile_options(ggml-ane PRIVATE
 
 # Enable debug logging if requested
 if (GGML_ANE_DEBUG)
-    add_compile_definitions(GGML_ANE_DEBUG)
+    target_compile_definitions(ggml-ane PRIVATE GGML_ANE_DEBUG)
 endif()
-
-# Link with main ggml library
-target_link_libraries(ggml PRIVATE ggml-ane)
-target_compile_definitions(ggml PRIVATE GGML_USE_ANE)

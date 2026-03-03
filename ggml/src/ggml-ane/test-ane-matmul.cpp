@@ -22,9 +22,9 @@
 
 // Test matrix dimensions
 // Using sizes that are large enough to benefit from ANE
-#define M 64      // Batch size / sequence length
-#define K 256     // Input dimension
-#define N 128     // Output dimension
+constexpr int DIM_M = 64;      // Batch size / sequence length
+constexpr int DIM_K = 256;     // Input dimension
+constexpr int DIM_N = 128;     // Output dimension
 
 static void init_matrix(float * mat, int rows, int cols, float scale = 1.0f) {
     for (int i = 0; i < rows * cols; i++) {
@@ -32,15 +32,15 @@ static void init_matrix(float * mat, int rows, int cols, float scale = 1.0f) {
     }
 }
 
-static void cpu_matmul(const float * A, const float * B, float * C, int M, int K, int N) {
-    // C = A @ B where A is [M, K] and B is [K, N]
-    for (int m = 0; m < M; m++) {
-        for (int n = 0; n < N; n++) {
+static void cpu_matmul(const float * A, const float * B, float * C, int rows_a, int cols_a, int cols_b) {
+    // C = A @ B where A is [rows_a, cols_a] and B is [cols_a, cols_b]
+    for (int m = 0; m < rows_a; m++) {
+        for (int n = 0; n < cols_b; n++) {
             float sum = 0.0f;
-            for (int k = 0; k < K; k++) {
-                sum += A[m * K + k] * B[k * N + n];
+            for (int k = 0; k < cols_a; k++) {
+                sum += A[m * cols_a + k] * B[k * cols_b + n];
             }
-            C[m * N + n] = sum;
+            C[m * cols_b + n] = sum;
         }
     }
 }
@@ -84,7 +84,7 @@ int main(int argc, char ** argv) {
     printf("  ✓ ANE runtime initialized\n\n");
     
     // Step 2: Generate MIL for matmul
-    printf("[2/5] Generating MIL for matmul (%dx%d @ %dx%d)...\n", M, K, K, N);
+    printf("[2/5] Generating MIL for matmul (%dx%d @ %dx%d)...\n", DIM_M, DIM_K, DIM_K, DIM_N);
     
     // Use conv-based matmul (3x faster on ANE)
     // MIL expects: input [1, K, M], weights [N, K, 1, 1], output [1, N, M]
@@ -101,7 +101,7 @@ int main(int argc, char ** argv) {
         "strides = [1, 1])[name = string(\"conv\")];\n"
         "    } -> (y);\n"
         "}\n",
-        K, M, N, K, N, K, N, M
+        DIM_K, DIM_M, DIM_N, DIM_K, DIM_N, DIM_K, DIM_N, DIM_M
     );
     
     printf("  MIL generated (%zu bytes)\n\n", strlen(mil_text));
@@ -110,28 +110,28 @@ int main(int argc, char ** argv) {
     printf("[3/5] Creating test data...\n");
     
     // Allocate matrices (row-major)
-    float * A = (float *)malloc(M * K * sizeof(float));  // Input [M, K]
-    float * B = (float *)malloc(K * N * sizeof(float));  // Weights [K, N]
-    float * C_cpu = (float *)malloc(M * N * sizeof(float));  // CPU result [M, N]
-    float * C_ane = (float *)malloc(M * N * sizeof(float));  // ANE result [M, N]
+    float * A = (float *)malloc(DIM_M * DIM_K * sizeof(float));  // Input [DIM_M, DIM_K]
+    float * B = (float *)malloc(DIM_K * DIM_N * sizeof(float));  // Weights [DIM_K, DIM_N]
+    float * C_cpu = (float *)malloc(DIM_M * DIM_N * sizeof(float));  // CPU result [DIM_M, DIM_N]
+    float * C_ane = (float *)malloc(DIM_M * DIM_N * sizeof(float));  // ANE result [DIM_M, DIM_N]
     
-    init_matrix(A, M, K, 0.1f);
-    init_matrix(B, K, N, 0.1f);
+    init_matrix(A, DIM_M, DIM_K, 0.1f);
+    init_matrix(B, DIM_K, DIM_N, 0.1f);
     
-    printf("  Input A: [%d, %d]\n", M, K);
-    printf("  Weights B: [%d, %d]\n", K, N);
-    printf("  Output C: [%d, %d]\n\n", M, N);
+    printf("  Input A: [%d, %d]\n", DIM_M, DIM_K);
+    printf("  Weights B: [%d, %d]\n", DIM_K, DIM_N);
+    printf("  Output C: [%d, %d]\n\n", DIM_M, DIM_N);
     
     // Compute CPU reference
     printf("[4/5] Computing CPU reference...\n");
-    cpu_matmul(A, B, C_cpu, M, K, N);
+    cpu_matmul(A, B, C_cpu, DIM_M, DIM_K, DIM_N);
     printf("  ✓ CPU matmul complete\n\n");
     
     // Step 5: Build weight blob for ANE
-    // ANE expects weights as FP16 in [N, K, 1, 1] format
+    // ANE expects weights as FP16 in [DIM_N, DIM_K, 1, 1] format
     printf("[5/5] Building weight blob for ANE...\n");
     
-    size_t weight_size = N * K * sizeof(uint16_t);  // FP16
+    size_t weight_size = DIM_N * DIM_K * sizeof(uint16_t);  // FP16
     size_t header_size = 64 + 64;  // Global header + chunk header
     size_t blob_size = header_size + weight_size;
     
@@ -148,19 +148,19 @@ int main(int argc, char ** argv) {
     *(uint32_t *)(chunk + 8) = (uint32_t)weight_size;   // data_size
     *(uint32_t *)(chunk + 16) = 128;                    // data_offset
     
-    // Convert B from [K, N] to [N, K] FP16
+    // Convert B from [DIM_K, DIM_N] to [DIM_N, DIM_K] FP16
     // Weights need to be transposed for conv format
     uint16_t * fp16_weights = (uint16_t *)(weight_blob + 128);
-    for (int n = 0; n < N; n++) {
-        for (int k = 0; k < K; k++) {
+    for (int n = 0; n < DIM_N; n++) {
+        for (int k = 0; k < DIM_K; k++) {
             // Convert float to FP16 (simple truncation for test)
-            float val = B[k * N + n];
+            float val = B[k * DIM_N + n];
             // IEEE FP32 to FP16 conversion (simplified)
             uint32_t bits = *(uint32_t *)&val;
             uint16_t fp16 = ((bits >> 16) & 0x8000) |  // sign
                            ((((bits >> 23) & 0xFF) - 127 + 15) << 10) |  // exponent
                            ((bits >> 13) & 0x3FF);  // mantissa
-            fp16_weights[n * K + k] = fp16;
+            fp16_weights[n * DIM_K + k] = fp16;
         }
     }
     
@@ -169,8 +169,8 @@ int main(int argc, char ** argv) {
     // Compile kernel
     printf("[6/7] Compiling ANE kernel...\n");
     
-    size_t input_size = K * M * sizeof(uint16_t);   // FP16
-    size_t output_size = N * M * sizeof(uint16_t);  // FP16
+    size_t input_size = DIM_K * DIM_M * sizeof(uint16_t);   // FP16
+    size_t output_size = DIM_N * DIM_M * sizeof(uint16_t);  // FP16
     
     ggml_ane_kernel_t kernel = ggml_ane_compile_kernel(
         mil_text,
@@ -188,19 +188,19 @@ int main(int argc, char ** argv) {
     }
     printf("  ✓ Kernel compiled\n\n");
     
-    // Prepare input (transpose A from [M, K] to [1, K, 1, M] for conv)
+    // Prepare input (transpose A from [DIM_M, DIM_K] to [1, DIM_K, 1, DIM_M] for conv)
     printf("[7/7] Executing on ANE...\n");
     
     uint16_t * input_fp16 = (uint16_t *)malloc(input_size);
-    for (int m = 0; m < M; m++) {
-        for (int k = 0; k < K; k++) {
-            float val = A[m * K + k];
+    for (int m = 0; m < DIM_M; m++) {
+        for (int k = 0; k < DIM_K; k++) {
+            float val = A[m * DIM_K + k];
             uint32_t bits = *(uint32_t *)&val;
             uint16_t fp16 = ((bits >> 16) & 0x8000) |
                            ((((bits >> 23) & 0xFF) - 127 + 15) << 10) |
                            ((bits >> 13) & 0x3FF);
-            // ANE expects [1, K, 1, M] format
-            input_fp16[k * M + m] = fp16;
+            // ANE expects [1, DIM_K, 1, DIM_M] format
+            input_fp16[k * DIM_M + m] = fp16;
         }
     }
     
@@ -224,21 +224,21 @@ int main(int argc, char ** argv) {
     
     // Convert output from FP16 to FP32
     uint16_t * out_fp16 = (uint16_t *)outputs[0];
-    for (int m = 0; m < M; m++) {
-        for (int n = 0; n < N; n++) {
-            // [1, N, 1, M] format
-            uint16_t fp16 = out_fp16[n * M + m];
+    for (int m = 0; m < DIM_M; m++) {
+        for (int n = 0; n < DIM_N; n++) {
+            // [1, DIM_N, 1, DIM_M] format
+            uint16_t fp16 = out_fp16[n * DIM_M + m];
             // FP16 to FP32 conversion
             uint32_t sign = (fp16 >> 15) & 1;
             uint32_t exp = (fp16 >> 10) & 0x1F;
             uint32_t mant = fp16 & 0x3FF;
             
             if (exp == 0) {
-                C_ane[m * N + n] = 0.0f;
+                C_ane[m * DIM_N + n] = 0.0f;
             } else {
                 uint32_t fp32_exp = exp - 15 + 127;
                 uint32_t fp32 = (sign << 31) | (fp32_exp << 23) | (mant << 13);
-                C_ane[m * N + n] = *(float *)&fp32;
+                C_ane[m * DIM_N + n] = *(float *)&fp32;
             }
         }
     }
@@ -250,7 +250,7 @@ int main(int argc, char ** argv) {
     printf("Results Comparison\n");
     printf("=================================\n\n");
     
-    bool match = compare_matrices(C_cpu, C_ane, M * N, 0.1f);  // Allow some FP16 precision loss
+    bool match = compare_matrices(C_cpu, C_ane, DIM_M * DIM_N, 0.1f);  // Allow some FP16 precision loss
     
     printf("\n");
     if (match) {

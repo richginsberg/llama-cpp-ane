@@ -161,11 +161,12 @@ struct ggml_ane_buffer_type_context {
 // ANE buffer context
 struct ggml_ane_buffer_context {
     ggml_backend_buffer_type_t buft;
-    void * base;                 // Base address (mapped IOSurface)
+    void * base;                 // Base address (mapped IOSurface or host ptr)
     size_t size;                 // Total size
     size_t allocated_size;       // Actually allocated
+    bool owns_memory;            // True if we allocated, false if wrapped from host_ptr
 #ifdef __OBJC__
-    IOSurfaceRef surface;        // Underlying IOSurface
+    IOSurfaceRef surface;        // Underlying IOSurface (nullptr for unified memory)
 #endif
 };
 

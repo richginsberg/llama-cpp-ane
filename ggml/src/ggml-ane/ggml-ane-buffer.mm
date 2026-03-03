@@ -8,6 +8,8 @@
 
 #include <map>
 #include <mutex>
+#include <errno.h>
+#include <string.h>
 
 // Wrap function definitions in extern "C" to match header declarations
 #ifdef __cplusplus
@@ -57,10 +59,11 @@ static void ggml_backend_ane_buffer_free_buffer(ggml_backend_buffer_t buffer) {
             std::lock_guard<std::mutex> lock(g_surface_map_mutex);
             g_surface_map.erase(ctx->base);
             CFRelease(ctx->surface);
-        } else if (ctx->base) {
-            // Unified memory buffer (malloc'd)
+        } else if (ctx->base && ctx->owns_memory) {
+            // Unified memory buffer that we allocated
             free(ctx->base);
         }
+        // If !owns_memory, the memory is owned by someone else (e.g., mmap'd model file)
 #endif
         delete ctx;
     }
@@ -115,15 +118,31 @@ static ggml_backend_buffer_t ggml_backend_ane_buffer_type_alloc_buffer(ggml_back
         // Align to page boundary
         size_t aligned_size = (size + 4095) & ~4095;
         
+        GGML_ANE_LOG_DEBUG("Allocating ANE buffer: %zu bytes (aligned: %zu)", size, aligned_size);
+        
         // Use regular malloc for unified memory (not IOSurface)
-        // IOSurface is only needed for ANE compute operations
-        // For model weights, unified memory via malloc is sufficient
-        void * base = aligned_alloc(4096, aligned_size);
+        void * base = nullptr;
+        
+        // Try aligned_alloc first, fall back to posix_memalign
+        base = aligned_alloc(4096, aligned_size);
         if (!base) {
-            GGML_ANE_LOG_ERROR("Failed to allocate buffer of size %zu", aligned_size);
+            // aligned_alloc requires size to be multiple of alignment
+            if (errno == EINVAL) {
+                // Fall back to posix_memalign
+                if (posix_memalign(&base, 4096, aligned_size) != 0) {
+                    base = nullptr;
+                }
+            }
+        }
+        
+        if (!base) {
+            GGML_ANE_LOG_ERROR("Failed to allocate buffer of size %zu (errno=%d: %s)", 
+                              aligned_size, errno, strerror(errno));
             return nullptr;
         }
         memset(base, 0, aligned_size);
+        
+        GGML_ANE_LOG_DEBUG("Allocated ANE buffer: %zu bytes at %p", aligned_size, base);
         
         // Create buffer context
         ggml_ane_buffer_context * ctx = new ggml_ane_buffer_context();
@@ -132,6 +151,7 @@ static ggml_backend_buffer_t ggml_backend_ane_buffer_type_alloc_buffer(ggml_back
         ctx->size = size;
         ctx->allocated_size = aligned_size;
         ctx->surface = nullptr;  // No IOSurface, using unified memory
+        ctx->owns_memory = true; // We allocated this memory
         
         // Create buffer
         ggml_backend_buffer_t buffer = ggml_backend_buffer_init(buft, ggml_backend_ane_buffer_interface, ctx, size);

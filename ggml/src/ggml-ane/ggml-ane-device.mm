@@ -91,12 +91,32 @@ static ggml_backend_buffer_type_t ggml_backend_ane_device_get_host_buffer_type(g
 }
 
 static ggml_backend_buffer_t ggml_backend_ane_device_buffer_from_host_ptr(ggml_backend_dev_t dev, void * ptr, size_t size, size_t max_tensor_size) {
-    // ANE uses unified memory, so we can wrap host pointers
-    // For now, return nullptr - this needs more complex implementation
-    return nullptr;
+    // ANE uses unified memory, so we can wrap host pointers directly
+    // Create a buffer context that wraps the existing memory
+    
+    ggml_ane_buffer_context * ctx = new ggml_ane_buffer_context();
+    ctx->buft = ggml_backend_ane_buffer_type();
+    ctx->base = ptr;
+    ctx->size = size;
+    ctx->allocated_size = size;
+    ctx->surface = nullptr;  // No IOSurface, using existing unified memory
+    ctx->owns_memory = false; // We don't own this memory, don't free it
+    
+    ggml_backend_buffer_t buffer = ggml_backend_buffer_init(
+        ggml_backend_ane_buffer_type(),
+        ggml_backend_ane_buffer_interface,
+        ctx,
+        size
+    );
+    
+    if (!buffer) {
+        delete ctx;
+        return nullptr;
+    }
+    
+    GGML_ANE_LOG_DEBUG("Wrapped host ptr %p as ANE buffer: %zu bytes", ptr, size);
+    return buffer;
     GGML_UNUSED(dev);
-    GGML_UNUSED(ptr);
-    GGML_UNUSED(size);
     GGML_UNUSED(max_tensor_size);
 }
 

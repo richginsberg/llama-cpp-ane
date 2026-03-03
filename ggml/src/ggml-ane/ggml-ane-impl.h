@@ -79,6 +79,29 @@ size_t ggml_ane_get_kernel_output_size(ggml_ane_kernel_t kernel, int index);
 int ggml_ane_get_kernel_input_count(ggml_ane_kernel_t kernel);
 int ggml_ane_get_kernel_output_count(ggml_ane_kernel_t kernel);
 
+////////////////////////////////////////////////////////////////////////////////
+// ANE Device API (ggml-ane-device.mm)
+////////////////////////////////////////////////////////////////////////////////
+
+// Initialize ANE device
+bool ggml_ane_device_init(void);
+
+// Get ANE device count
+int ggml_backend_ane_device_count(void);
+
+// Get ANE device by index
+ggml_backend_dev_t ggml_backend_ane_get_device(int index);
+
+////////////////////////////////////////////////////////////////////////////////
+// ANE Buffer API (ggml-ane-buffer.mm)
+////////////////////////////////////////////////////////////////////////////////
+
+// Get ANE buffer type
+ggml_backend_buffer_type_t ggml_backend_ane_buffer_type(void);
+
+// Check if buffer is ANE buffer
+bool ggml_backend_buffer_is_ane(ggml_backend_buffer_t buffer);
+
 #ifdef __cplusplus
 }
 #endif

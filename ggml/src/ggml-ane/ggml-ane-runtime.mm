@@ -244,8 +244,8 @@ ggml_ane_kernel_t ggml_ane_compile_kernel(
         ggml_ane_kernel * kernel = new ggml_ane_kernel();
         memset(kernel, 0, sizeof(*kernel));
         
-        kernel->model = [model retain];
-        kernel->tmpDir = [tmpDir retain];
+        kernel->model = model;
+        kernel->tmpDir = tmpDir;
         kernel->nInputs = n_inputs;
         kernel->nOutputs = n_outputs;
         kernel->hash = hash;
@@ -314,7 +314,7 @@ ggml_ane_kernel_t ggml_ane_compile_kernel(
             return nullptr;
         }
         
-        [kernel->request retain];
+        kernel->request = request;
         
         // Cache if hash provided
         if (hash != 0) {
@@ -439,18 +439,14 @@ void ggml_ane_free_kernel(ggml_ane_kernel_t kernel) {
     @autoreleasepool {
         NSError * error = nil;
         
-        // Unload model
+        // Model will be released by ARC when kernel is deleted
         if (kernel->model) {
             ((BOOL(*)(id, SEL, unsigned int, NSError **))objc_msgSend)(
                 kernel->model, @selector(unloadWithQoS:error:), 21, &error
             );
-            [kernel->model release];
         }
         
-        // Release request
-        if (kernel->request) {
-            [kernel->request release];
-        }
+        // Request will be released by ARC
         
         // Release IOSurfaces
         if (kernel->ioInputs) {
@@ -484,7 +480,6 @@ void ggml_ane_free_kernel(ggml_ane_kernel_t kernel) {
         // Cleanup temp directory
         if (kernel->tmpDir) {
             [[NSFileManager defaultManager] removeItemAtPath:kernel->tmpDir error:nil];
-            [kernel->tmpDir release];
         }
         
         delete kernel;

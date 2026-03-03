@@ -4,13 +4,7 @@
 #import <Foundation/Foundation.h>
 #import <IOSurface/IOSurface.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
 #include "ggml-ane-impl.h"
-#ifdef __cplusplus
-}
-#endif
 
 #include <map>
 #include <mutex>

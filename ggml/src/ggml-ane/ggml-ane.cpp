@@ -20,6 +20,15 @@
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
+// External declarations (from ggml-ane-device.mm)
+////////////////////////////////////////////////////////////////////////////////
+
+// Device struct and initialization flag (defined in ggml-ane-device.mm)
+extern "C" struct ggml_backend_device g_ane_device;
+extern "C" bool g_ane_device_initialized;
+extern "C" bool ggml_ane_device_init(void);
+
+////////////////////////////////////////////////////////////////////////////////
 // GUID Definition (must be before use)
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -269,8 +278,18 @@ static ggml_backend_dev_t ggml_backend_ane_reg_get_device(ggml_backend_reg_t reg
     if (!GGML_ANE_AVAILABLE || index != 0) {
         return nullptr;
     }
-    return ggml_backend_ane_get_device(0);
-    GGML_UNUSED(reg);
+    
+    // Initialize device if needed
+    if (!g_ane_device_initialized) {
+        if (!ggml_ane_device_init()) {
+            return nullptr;
+        }
+    }
+    
+    // Set the registration pointer (needed for device enumeration)
+    g_ane_device.reg = reg;
+    
+    return &g_ane_device;
 }
 
 static void * ggml_backend_ane_reg_get_proc_address(ggml_backend_reg_t reg, const char * name) {

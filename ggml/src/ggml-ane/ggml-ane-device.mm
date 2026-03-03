@@ -10,10 +10,10 @@
 extern "C" {
 #endif
 
-// Global device context
-static struct ggml_ane_device_context g_ane_device_ctx = {0};
-static struct ggml_backend_device g_ane_device = {0};
-static bool g_ane_device_initialized = false;
+// Global device context (non-static for access from ggml-ane.cpp)
+struct ggml_ane_device_context g_ane_device_ctx = {0};
+struct ggml_backend_device g_ane_device = {0};
+bool g_ane_device_initialized = false;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Device Interface Implementation

@@ -19,7 +19,12 @@ typedef struct ggml_ane_kernel * ggml_ane_kernel_t;
 
 ////////////////////////////////////////////////////////////////////////////////
 // ANE Runtime API (ggml-ane-runtime.mm)
+// These functions are implemented in Objective-C++ but called from C++
 ////////////////////////////////////////////////////////////////////////////////
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 // Initialize ANE runtime - loads private framework
 bool ggml_ane_runtime_init(void);
@@ -74,11 +79,20 @@ size_t ggml_ane_get_kernel_output_size(ggml_ane_kernel_t kernel, int index);
 int ggml_ane_get_kernel_input_count(ggml_ane_kernel_t kernel);
 int ggml_ane_get_kernel_output_count(ggml_ane_kernel_t kernel);
 
+#ifdef __cplusplus
+}
+#endif
+
 ////////////////////////////////////////////////////////////////////////////////
 // MIL Generation API (ggml-ane-mil.mm)
+// Only available in Objective-C++ context
 ////////////////////////////////////////////////////////////////////////////////
 
 #ifdef __OBJC__
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Build FP16 weight blob with header
 NSData * ggml_ane_build_weight_blob(const float * weights_f32, int out_ch, int in_ch);
 
@@ -93,7 +107,15 @@ NSString * ggml_ane_gen_mil_rms_norm(int dim, int spatial, float eps);
 
 // Convert NSString to C string (caller must free)
 char * ggml_ane_mil_to_cstring(NSString * mil);
+
+#ifdef __cplusplus
+}
 #endif
+#endif
+
+////////////////////////////////////////////////////////////////////////////////
+// Internal Structures
+////////////////////////////////////////////////////////////////////////////////
 
 // ANE device context
 struct ggml_ane_device_context {

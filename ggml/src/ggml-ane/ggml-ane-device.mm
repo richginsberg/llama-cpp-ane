@@ -5,11 +5,6 @@
 #include "ggml-ane-impl.h"
 #include <string.h>
 
-// Enable C linkage for functions called from .cpp files
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 // Global device context
 static struct ggml_ane_device_context g_ane_device_ctx = {0};
 static struct ggml_backend_device g_ane_device = {0};
@@ -259,7 +254,3 @@ ggml_backend_dev_t ggml_backend_ane_get_device(int index) {
 ggml_backend_dev_t ggml_backend_ane_device_get(void) {
     return ggml_backend_ane_get_device(0);
 }
-
-#ifdef __cplusplus
-}
-#endif

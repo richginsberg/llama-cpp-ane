@@ -374,15 +374,20 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     }
     
     // Prepare input data
-    // src1 is [K, M] in row-major, ANE expects [1, K, 1, M]
-    // which means memory layout is [K, M] with K as the fast dimension
+    // src1 is [K, M] row-major: memory is [row0(M elts), row1(M elts), ...]
+    // ANE expects [1, K, 1, M] column-major: memory is [col0(K elts), col1(K elts), ...]
+    // Need to transpose!
     float * input_conv = (float *)malloc(K * M * sizeof(float));
     const float * src1_data = (const float *)src1->data;
     
-    // Check if we need to transpose src1
-    // src1 layout: ne[0] = K, so it's [K, M] which is what we need
-    // Just copy directly since it's already in the right layout for [1, K, 1, M]
-    memcpy(input_conv, src1_data, K * M * sizeof(float));
+    // Transpose from row-major [K, M] to column-major [K, M] (which is [1, K, 1, M])
+    for (int64_t k = 0; k < K; k++) {
+        for (int64_t m = 0; m < M; m++) {
+            // Row-major: src1_data[k * M + m]
+            // Column-major: input_conv[m * K + k]
+            input_conv[m * K + k] = src1_data[k * M + m];
+        }
+    }
     
     // Allocate output
     float * output_conv = (float *)malloc(N * M * sizeof(float));
@@ -401,9 +406,17 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     }
     
     // Copy output to dst
-    // dst is [N, M] row-major, output is [1, N, 1, M] which is [N, M] in memory
+    // ANE output is [1, N, 1, M] column-major: memory is [col0(N elts), col1(N elts), ...]
+    // dst is [N, M] row-major: memory is [row0(M elts), row1(M elts), ...]
+    // Need to transpose!
     float * dst_data = (float *)dst->data;
-    memcpy(dst_data, output_conv, N * M * sizeof(float));
+    for (int64_t n = 0; n < N; n++) {
+        for (int64_t m = 0; m < M; m++) {
+            // Column-major: output_conv[m * N + n]
+            // Row-major: dst_data[n * M + m]
+            dst_data[n * M + m] = output_conv[m * N + n];
+        }
+    }
     
     free(input_conv);
     free(output_conv);

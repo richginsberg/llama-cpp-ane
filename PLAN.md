@@ -281,22 +281,74 @@ cmake --build build
 ## Progress Tracking
 
 - **Started:** 2026-03-02
-- **Current Phase:** Phase 1 (Foundation)
-- **Overall Progress:** 0%
+- **Current Phase:** Phase 5 (Integration & Optimization)
+- **Overall Progress:** 70%
 
 ### Milestone Log:
-- [ ] Phase 1 Complete - Backend registers successfully
-- [ ] Phase 2 Complete - Can compile and run MIL
-- [ ] Phase 3 Complete - All core ops have MIL generators
-- [ ] Phase 4 Complete - Can execute simple graphs
-- [ ] Phase 5 Complete - Benchmarking against Metal
+- [x] Phase 1 Complete - Backend registers successfully
+- [x] Phase 2 Complete - Can compile and run MIL
+- [x] Phase 3 Complete - Core ops have MIL generators (MUL_MAT via conv)
+- [x] Phase 4 Complete - Can execute graphs with hybrid ANE+CPU
+- [ ] Phase 5 Complete - Stable multi-turn inference
 - [ ] Production Ready - Merged and documented
+
+### Current Status:
+- **First prompt works**: 419.8 t/s prompt, 133.5 t/s generation
+- **Fixed stride-based indexing** in all CPU ops (ADD, MUL, RMS_NORM, SOFTMAX)
+- **Commit**: `4b9c5fc97` - stride fix for all CPU ops
+- **Next**: Test multi-turn interactive mode
+
+---
+
+## Phase 6: Optimizations (from ANE-LM analysis)
+
+**Goal:** 2-3× speedup through kernel fusion and layout optimization
+
+### 6.1: Fused Kernels (HIGH IMPACT)
+- [ ] Implement fused QKV projection (3 matmuls → 1 kernel)
+- [ ] Implement fused FFN (gate + up + silu + down → 1 kernel)
+- [ ] MIL generation for concat operations
+- [ ] Expected: 2-3× speedup, reduced kernel launch overhead
+
+### 6.2: Strided IOSurface Layout
+- [ ] Test ANE_SPATIAL=32 (vs our current M=16)
+- [ ] Implement strided channel layout: `idx = c * 32` instead of `c * M`
+- [ ] May be required for hardware correctness
+
+### 6.3: Accelerate Framework for CPU Ops
+- [ ] Replace CPU loops with vDSP vectorized operations
+- [ ] Use `cblas_sgemv` for CPU matmul fallback
+- [ ] Expected: 2-3× CPU fallback speedup
+
+### 6.4: Compile Cache
+- [ ] Store compiled kernels to `~/Library/Caches/llama-ane/`
+- [ ] Use marker files to skip recompilation
+- [ ] Expected: 50-100ms faster startup
+
+### 6.5: Native FP16
+- [ ] Use `__fp16` on ARM64 instead of `uint16_t`
+- [ ] Reduces conversion overhead
+- [ ] Only for ARM64 builds
+
+---
+
+## Key Decisions (Updated)
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| ANE spatial dimension | M=16 (min), test M=32 | ANE-LM uses 32; we found 16 works |
+| MIL format | Conv-based matmul | Native matmul op fails at descriptor creation |
+| Weight format | FP16 in BLOBFILE | ANE doesn't support quantized weights |
+| Buffer allocation | Compute-only, CPU for large tensors | ANE buffer allocation fails >256MB |
+| CPU ops | Stride-based indexing | Linear indexing corrupts non-contiguous tensors |
+| NaN handling | Detect + CPU fallback | Prevents ANE corruption |
 
 ---
 
 ## References
 
 - [maderix/ANE](https://github.com/maderix/ANE) - Original ANE reverse engineering
+- [johnmai-dev/ANE-LM](https://github.com/johnmai-dev/ANE-LM) - Qwen3.5 on ANE (fused kernels, strided layout)
 - [Inside the M4 Apple Neural Engine](https://maderix.substack.com/p/inside-the-m4-apple-neural-engine) - Deep dive
 - [ggml-metal](../ggml/src/ggml-metal/) - Reference backend implementation
 - [Apple MLX](https://github.com/ml-explore/mlx) - Apple's ML framework

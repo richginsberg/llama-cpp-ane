@@ -43,6 +43,13 @@ static bool g_debug_enabled = false;
 static int g_graph_count = 0;  // Global graph counter
 static int g_first_nan_graph = -1;  // First graph where NaN was detected
 
+////////////////////////////////////////////////////////////////////////////////
+// Kernel Cache
+////////////////////////////////////////////////////////////////////////////////
+
+static std::map<uint64_t, ggml_ane_kernel_t> g_matmul_kernels;
+static std::mutex g_matmul_kernels_mutex;
+
 // Simple hash for matmul dimensions
 static uint64_t hash_matmul_dims(int64_t m, int64_t n, int64_t k) {
     return ((uint64_t)m << 42) | ((uint64_t)n << 21) | (uint64_t)k;

@@ -336,27 +336,35 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
         // Build weight blob
         // Weights in src0 are [K, N] with strides nb[0], nb[1]
         // Need to transpose to [N, K] for conv format
-        const float * weights = (const float *)src0->data;
+        // NOTE: src0 may be FP16 or FP32!
+        
+        GGML_ANE_LOG_DEBUG("src0 type: %d (F16=%d, F32=%d)", src0->type, GGML_TYPE_F16, GGML_TYPE_F32);
+        GGML_ANE_LOG_DEBUG("src0: nb[0]=%ld, nb[1]=%ld, K=%ld, N=%ld", 
+                           src0->nb[0], src0->nb[1], K, N);
+        
         float * weights_transposed = (float *)malloc(N * K * sizeof(float));
         
-        GGML_ANE_LOG_DEBUG("src0: nb[0]=%ld, nb[1]=%ld, expected nb[1]=%ld", 
-                           src0->nb[0], src0->nb[1], K * sizeof(float));
-        
-        // Handle potentially non-contiguous tensors
-        if (src0->nb[0] == sizeof(float) && src0->nb[1] == K * sizeof(float)) {
-            // Contiguous - fast path
-            GGML_ANE_LOG_DEBUG("src0 is contiguous, using fast transpose");
+        if (src0->type == GGML_TYPE_F16) {
+            // FP16 weights - need to convert to FP32
+            const _Float16 * weights_f16 = (const _Float16 *)src0->data;
+            GGML_ANE_LOG_DEBUG("src0 is FP16, converting to FP32 during transpose");
+            
             for (int64_t n = 0; n < N; n++) {
                 for (int64_t k = 0; k < K; k++) {
-                    weights_transposed[n * K + k] = weights[k * N + n];
+                    // src0 is [K, N] with stride nb[1] for K dimension
+                    // Element (k, n) is at offset k * nb[1] + n * nb[0]
+                    const _Float16 * w_ptr = (const _Float16 *)((const char *)weights_f16 + k * src0->nb[1] + n * src0->nb[0]);
+                    weights_transposed[n * K + k] = (float)*w_ptr;
                 }
             }
         } else {
-            // Non-contiguous - use strides
-            GGML_ANE_LOG_DEBUG("src0 is NON-contiguous, using stride-based transpose");
+            // FP32 weights
+            const float * weights_f32 = (const float *)src0->data;
+            GGML_ANE_LOG_DEBUG("src0 is FP32");
+            
             for (int64_t n = 0; n < N; n++) {
                 for (int64_t k = 0; k < K; k++) {
-                    const float * w_ptr = (const float *)((const char *)weights + k * src0->nb[1] + n * src0->nb[0]);
+                    const float * w_ptr = (const float *)((const char *)weights_f32 + k * src0->nb[1] + n * src0->nb[0]);
                     weights_transposed[n * K + k] = *w_ptr;
                 }
             }
@@ -397,24 +405,37 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     // Prepare input data
     // src1 is [K, M] with strides nb[0], nb[1]
     // ANE expects [1, K, 1, M] which in memory is [K, M] row-major
+    // NOTE: src1 may be FP16 or FP32!
+    
+    GGML_ANE_LOG_DEBUG("src1 type: %d (F16=%d, F32=%d)", src1->type, GGML_TYPE_F16, GGML_TYPE_F32);
+    
     float * input_conv = (float *)malloc(K * M * sizeof(float));
-    const float * src1_data = (const float *)src1->data;
     
-    GGML_ANE_LOG_DEBUG("src1: nb[0]=%ld, nb[1]=%ld, expected nb[1]=%ld", 
-                       src1->nb[0], src1->nb[1], K * sizeof(float));
-    
-    // Handle potentially non-contiguous tensors
-    if (src1->nb[0] == sizeof(float) && src1->nb[1] == K * sizeof(float)) {
-        // Contiguous - fast path
-        GGML_ANE_LOG_DEBUG("src1 is contiguous, using memcpy");
-        memcpy(input_conv, src1_data, K * M * sizeof(float));
-    } else {
-        // Non-contiguous - use strides
-        GGML_ANE_LOG_DEBUG("src1 is NON-contiguous, using stride-based copy");
+    if (src1->type == GGML_TYPE_F16) {
+        // FP16 input - need to convert to FP32
+        const _Float16 * src1_f16 = (const _Float16 *)src1->data;
+        GGML_ANE_LOG_DEBUG("src1 is FP16, converting to FP32");
+        
         for (int64_t k = 0; k < K; k++) {
             for (int64_t m = 0; m < M; m++) {
-                const float * in_ptr = (const float *)((const char *)src1_data + k * src1->nb[1] + m * src1->nb[0]);
-                input_conv[k * M + m] = *in_ptr;
+                const _Float16 * in_ptr = (const _Float16 *)((const char *)src1_f16 + k * src1->nb[1] + m * src1->nb[0]);
+                input_conv[k * M + m] = (float)*in_ptr;
+            }
+        }
+    } else {
+        // FP32 input
+        const float * src1_f32 = (const float *)src1->data;
+        GGML_ANE_LOG_DEBUG("src1 is FP32");
+        
+        // Check if contiguous for fast path
+        if (src1->nb[0] == sizeof(float) && src1->nb[1] == K * sizeof(float)) {
+            memcpy(input_conv, src1_f32, K * M * sizeof(float));
+        } else {
+            for (int64_t k = 0; k < K; k++) {
+                for (int64_t m = 0; m < M; m++) {
+                    const float * in_ptr = (const float *)((const char *)src1_f32 + k * src1->nb[1] + m * src1->nb[0]);
+                    input_conv[k * M + m] = *in_ptr;
+                }
             }
         }
     }

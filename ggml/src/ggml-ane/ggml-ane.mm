@@ -822,8 +822,14 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
                         GGML_ANE_LOG_WARN("MUL: src0 is NaN before execution!");
                         // Check if this tensor was produced by a previous op
                         if (node->src[0]->op != GGML_OP_NONE) {
-                            GGML_ANE_LOG_WARN("MUL: src0 comes from op %s", ggml_op_name(node->src[0]->op));
+                            GGML_ANE_LOG_WARN("MUL: src0 comes from op %s (should have been computed)", 
+                                             ggml_op_name(node->src[0]->op));
+                        } else {
+                            GGML_ANE_LOG_WARN("MUL: src0 is a leaf tensor (input/model weight)");
                         }
+                        // Skip this op - let CPU handle it
+                        GGML_ANE_LOG_WARN("MUL: skipping, CPU will handle");
+                        break;
                     }
                 }
                 ggml_ane_exec_mul(node);

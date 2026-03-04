@@ -930,8 +930,20 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
                                         case GGML_UNARY_OP_ABS:
                                             *d = fabsf(*s);
                                             break;
-                                        case GGML_UNARY_OP_SQRT:
-                                            *d = sqrtf(*s);
+                                        case GGML_UNARY_OP_SGN:
+                                            *d = (*s > 0.0f) ? 1.0f : ((*s < 0.0f) ? -1.0f : 0.0f);
+                                            break;
+                                        case GGML_UNARY_OP_STEP:
+                                            *d = (*s > 0.0f) ? 1.0f : 0.0f;
+                                            break;
+                                        case GGML_UNARY_OP_TANH:
+                                            *d = tanhf(*s);
+                                            break;
+                                        case GGML_UNARY_OP_RELU:
+                                            *d = (*s > 0.0f) ? *s : 0.0f;
+                                            break;
+                                        case GGML_UNARY_OP_SIGMOID:
+                                            *d = 1.0f / (1.0f + expf(-*s));
                                             break;
                                         default:
                                             // Unknown unary op - just copy
@@ -1011,26 +1023,23 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
                     const struct ggml_tensor * dst_t = node;
                     
                     if (!src || !dst_t) {
-                        GGML_ANE_LOG_DEBUG("CONT/CPY: null tensor");
                         break;
                     }
                     if (!src->data || !dst_t->data) {
-                        GGML_ANE_LOG_DEBUG("CONT/CPY: null data");
                         break;
                     }
                     
                     // Use the destination's byte count (CONT makes it contiguous)
                     const size_t nbytes = ggml_nbytes(dst_t);
                     
-                    // Handle zero-size case gracefully
+                    // Handle zero-size case - this can happen with view operations
+                    // Just skip without warning (it's normal for some graphs)
                     if (nbytes == 0) {
-                        // This can happen for view operations - just skip
                         break;
                     }
                     
                     // Safety check - max 1GB
                     if (nbytes > 1024*1024*1024) {
-                        GGML_ANE_LOG_DEBUG("CONT/CPY: size too large %zu", nbytes);
                         break;
                     }
                     

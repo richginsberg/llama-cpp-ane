@@ -656,7 +656,12 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
         }
     }
     
-    // Debug: show first node's inputs
+    // Debug: show all nodes in this graph
+    GGML_ANE_LOG_DEBUG("Graph nodes:");
+    for (int i = 0; i < cgraph->n_nodes && i < 10; i++) {
+        struct ggml_tensor * n = cgraph->nodes[i];
+        GGML_ANE_LOG_DEBUG("  node[%d]: op=%s, data=%p", i, ggml_op_name(n->op), n->data);
+    }
     if (cgraph->n_nodes > 0) {
         struct ggml_tensor * first = cgraph->nodes[0];
         GGML_ANE_LOG_DEBUG("First node: op=%s", ggml_op_name(first->op));

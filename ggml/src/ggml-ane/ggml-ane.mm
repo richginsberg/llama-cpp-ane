@@ -1026,7 +1026,7 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
                 // These ops must COPY data
                 {
                     const struct ggml_tensor * src = node->src[0];
-                    const struct ggml_tensor * dst_t = node;
+                    struct ggml_tensor * dst_t = node;
                     
                     if (!src || !dst_t) {
                         break;
@@ -1035,11 +1035,15 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
                         break;
                     }
                     
-                    // Get dimensions
-                    const int64_t ne0 = src->ne[0];
-                    const int64_t ne1 = src->ne[1];
-                    const int64_t ne2 = src->ne[2];
-                    const int64_t ne3 = src->ne[3];
+                    // Get dimensions - use minimum of src and dst
+                    const int64_t ne0 = src->ne[0] < dst_t->ne[0] ? src->ne[0] : dst_t->ne[0];
+                    const int64_t ne1 = src->ne[1] < dst_t->ne[1] ? src->ne[1] : dst_t->ne[1];
+                    const int64_t ne2 = src->ne[2] < dst_t->ne[2] ? src->ne[2] : dst_t->ne[2];
+                    const int64_t ne3 = src->ne[3] < dst_t->ne[3] ? src->ne[3] : dst_t->ne[3];
+                    
+                    if (ne0 <= 0 || ne1 <= 0 || ne2 <= 0 || ne3 <= 0) {
+                        break;
+                    }
                     
                     const int64_t nb0 = src->nb[0];
                     const int64_t nb1 = src->nb[1];
@@ -1051,36 +1055,46 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
                     const int64_t dst_nb2 = dst_t->nb[2];
                     const int64_t dst_nb3 = dst_t->nb[3];
                     
-                    // Check if we can use fast memcpy (both contiguous)
-                    const bool src_contiguous = (nb0 == sizeof(float)) && 
-                                                (ne1 <= 1 || nb1 == ne0 * sizeof(float)) &&
+                    // Safety check: validate strides
+                    if (nb0 <= 0 || nb1 <= 0 || nb2 <= 0 || nb3 <= 0 ||
+                        dst_nb0 <= 0 || dst_nb1 <= 0 || dst_nb2 <= 0 || dst_nb3 <= 0) {
+                        GGML_ANE_LOG_WARN("CPY: invalid strides");
+                        break;
+                    }
+                    
+                    // Handle type conversion
+                    const bool same_type = (src->type == dst_t->type);
+                    const size_t src_type_size = ggml_type_size(src->type);
+                    const size_t dst_type_size = ggml_type_size(dst_t->type);
+                    
+                    // Check if we can use fast memcpy (both contiguous AND same type)
+                    const bool src_contiguous = (nb0 == src_type_size) && 
+                                                (ne1 <= 1 || nb1 == ne0 * src_type_size) &&
                                                 (ne2 <= 1 || nb2 == ne1 * nb1) &&
                                                 (ne3 <= 1 || nb3 == ne2 * nb2);
                     
-                    const bool dst_contiguous = (dst_nb0 == sizeof(float)) && 
-                                                (ne1 <= 1 || dst_nb1 == ne0 * sizeof(float)) &&
+                    const bool dst_contiguous = (dst_nb0 == dst_type_size) && 
+                                                (ne1 <= 1 || dst_nb1 == ne0 * dst_type_size) &&
                                                 (ne2 <= 1 || dst_nb2 == ne1 * dst_nb1) &&
                                                 (ne3 <= 1 || dst_nb3 == ne2 * dst_nb2);
                     
-                    if (src_contiguous && dst_contiguous) {
-                        // Fast path: both contiguous, use memcpy
-                        const size_t nbytes = ne0 * ne1 * ne2 * ne3 * sizeof(float);
+                    if (src_contiguous && dst_contiguous && same_type) {
+                        // Fast path: both contiguous, same type - use memcpy
+                        const size_t nbytes = ne0 * ne1 * ne2 * ne3 * src_type_size;
                         if (nbytes > 0 && nbytes <= 1024*1024*1024) {
                             memcpy(dst_t->data, src->data, nbytes);
                         }
-                    } else {
-                        // Slow path: stride-based copy
+                    } else if (src->type == GGML_TYPE_F32 && dst_t->type == GGML_TYPE_F32) {
+                        // F32 to F32 with stride-based copy
                         for (int64_t i3 = 0; i3 < ne3; i3++) {
                             for (int64_t i2 = 0; i2 < ne2; i2++) {
                                 for (int64_t i1 = 0; i1 < ne1; i1++) {
                                     const char * src_row = (const char *)src->data + i3*nb3 + i2*nb2 + i1*nb1;
                                     char * dst_row = (char *)dst_t->data + i3*dst_nb3 + i2*dst_nb2 + i1*dst_nb1;
                                     
-                                    // Check if we can copy entire row at once
                                     if (nb0 == sizeof(float) && dst_nb0 == sizeof(float)) {
                                         memcpy(dst_row, src_row, ne0 * sizeof(float));
                                     } else {
-                                        // Element-by-element copy
                                         for (int64_t i0 = 0; i0 < ne0; i0++) {
                                             const float * s = (const float *)(src_row + i0*nb0);
                                             float * d = (float *)(dst_row + i0*dst_nb0);
@@ -1090,6 +1104,38 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
                                 }
                             }
                         }
+                    } else if (src->type == GGML_TYPE_F16 && dst_t->type == GGML_TYPE_F32) {
+                        // F16 to F32
+                        for (int64_t i3 = 0; i3 < ne3; i3++) {
+                            for (int64_t i2 = 0; i2 < ne2; i2++) {
+                                for (int64_t i1 = 0; i1 < ne1; i1++) {
+                                    const char * src_row = (const char *)src->data + i3*nb3 + i2*nb2 + i1*nb1;
+                                    char * dst_row = (char *)dst_t->data + i3*dst_nb3 + i2*dst_nb2 + i1*dst_nb1;
+                                    for (int64_t i0 = 0; i0 < ne0; i0++) {
+                                        const ggml_fp16_t * s = (const ggml_fp16_t *)(src_row + i0*nb0);
+                                        float * d = (float *)(dst_row + i0*dst_nb0);
+                                        *d = ggml_fp16_to_fp32(*s);
+                                    }
+                                }
+                            }
+                        }
+                    } else if (src->type == GGML_TYPE_F32 && dst_t->type == GGML_TYPE_F16) {
+                        // F32 to F16
+                        for (int64_t i3 = 0; i3 < ne3; i3++) {
+                            for (int64_t i2 = 0; i2 < ne2; i2++) {
+                                for (int64_t i1 = 0; i1 < ne1; i1++) {
+                                    const char * src_row = (const char *)src->data + i3*nb3 + i2*nb2 + i1*nb1;
+                                    char * dst_row = (char *)dst_t->data + i3*dst_nb3 + i2*dst_nb2 + i1*dst_nb1;
+                                    for (int64_t i0 = 0; i0 < ne0; i0++) {
+                                        const float * s = (const float *)(src_row + i0*nb0);
+                                        ggml_fp16_t * d = (ggml_fp16_t *)(dst_row + i0*dst_nb0);
+                                        *d = ggml_fp32_to_fp16(*s);
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        GGML_ANE_LOG_WARN("CPY: unsupported type combination src=%d dst=%d", src->type, dst_t->type);
                     }
                 }
                 break;

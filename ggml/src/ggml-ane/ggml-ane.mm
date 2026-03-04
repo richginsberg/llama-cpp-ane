@@ -314,6 +314,43 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     // Check if we have a cached kernel for these dimensions
     uint64_t hash = hash_matmul_dims(K, N, M);
     
+    // Transpose weights (needed for both compilation and execution)
+    // Weights in src0 are [K, N] with strides nb[0], nb[1]
+    // Need to transpose to [N, K] for matmul format
+    float * weights_transposed = (float *)malloc(N * K * sizeof(float));
+    
+    GGML_ANE_LOG_DEBUG("src0 type: %d (F16=%d, F32=%d)", src0->type, GGML_TYPE_F16, GGML_TYPE_F32);
+    GGML_ANE_LOG_DEBUG("src0: nb[0]=%ld, nb[1]=%ld, K=%ld, N=%ld", 
+                       src0->nb[0], src0->nb[1], K, N);
+    
+    if (src0->type == GGML_TYPE_F16) {
+        // FP16 weights - need to convert to FP32
+        const ggml_fp16_t * weights_f16 = (const ggml_fp16_t *)src0->data;
+        GGML_ANE_LOG_DEBUG("src0 is FP16, converting to FP32 during transpose");
+        
+        for (int64_t n = 0; n < N; n++) {
+            for (int64_t k = 0; k < K; k++) {
+                const ggml_fp16_t * w_ptr = (const ggml_fp16_t *)((const char *)weights_f16 + k * src0->nb[1] + n * src0->nb[0]);
+                weights_transposed[n * K + k] = ggml_fp16_to_fp32(*w_ptr);
+            }
+        }
+    } else {
+        // FP32 weights
+        const float * weights_f32 = (const float *)src0->data;
+        GGML_ANE_LOG_DEBUG("src0 is FP32");
+        
+        for (int64_t n = 0; n < N; n++) {
+            for (int64_t k = 0; k < K; k++) {
+                const float * w_ptr = (const float *)((const char *)weights_f32 + k * src0->nb[1] + n * src0->nb[0]);
+                weights_transposed[n * K + k] = *w_ptr;
+            }
+        }
+    }
+    
+    GGML_ANE_LOG_DEBUG("First 5 transposed weights: %.6f %.6f %.6f %.6f %.6f",
+                       weights_transposed[0], weights_transposed[1], weights_transposed[2],
+                       weights_transposed[3], weights_transposed[4]);
+    
     ggml_ane_kernel_t kernel = nullptr;
     {
         std::lock_guard<std::mutex> lock(g_matmul_kernels_mutex);
@@ -325,78 +362,40 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     
     // Compile kernel if not cached
     if (!kernel) {
-        // Generate MIL for conv-based matmul
-        // Input: [1, K, 1, M], Weights: [N, K, 1, 1], Output: [1, N, 1, M]
-        NSString * mil = ggml_ane_gen_mil_conv(K, N, M);
+        // Try using matmul format instead of conv format
+        // This passes weights as a second input tensor instead of embedding them
+        // Input: [1, K, M], Weights: [1, N, K], Output: [1, N, M]
+        NSString * mil = ggml_ane_gen_mil_matmul(K, N, M);
         const char * mil_cstr = [mil UTF8String];
         
-        GGML_ANE_LOG_DEBUG("MIL generated for K=%ld, N=%ld, M=%ld", K, N, M);
+        GGML_ANE_LOG_DEBUG("MIL generated for K=%ld, N=%ld, M=%ld (using matmul format)", K, N, M);
         GGML_ANE_LOG_DEBUG("MIL text:\n%s", mil_cstr);
         
-        // Build weight blob
-        // Weights in src0 are [K, N] with strides nb[0], nb[1]
-        // Need to transpose to [N, K] for conv format
-        // NOTE: src0 may be FP16 or FP32!
+        // For matmul format, we pass weights as second input (no weight blob)
+        // Keep weights_transposed for later use as input
         
-        GGML_ANE_LOG_DEBUG("src0 type: %d (F16=%d, F32=%d)", src0->type, GGML_TYPE_F16, GGML_TYPE_F32);
-        GGML_ANE_LOG_DEBUG("src0: nb[0]=%ld, nb[1]=%ld, K=%ld, N=%ld", 
-                           src0->nb[0], src0->nb[1], K, N);
-        
-        float * weights_transposed = (float *)malloc(N * K * sizeof(float));
-        
-        if (src0->type == GGML_TYPE_F16) {
-            // FP16 weights - need to convert to FP32
-            const ggml_fp16_t * weights_f16 = (const ggml_fp16_t *)src0->data;
-            GGML_ANE_LOG_DEBUG("src0 is FP16, converting to FP32 during transpose");
-            
-            for (int64_t n = 0; n < N; n++) {
-                for (int64_t k = 0; k < K; k++) {
-                    // src0 is [K, N] with stride nb[1] for K dimension
-                    // Element (k, n) is at offset k * nb[1] + n * nb[0]
-                    const ggml_fp16_t * w_ptr = (const ggml_fp16_t *)((const char *)weights_f16 + k * src0->nb[1] + n * src0->nb[0]);
-                    weights_transposed[n * K + k] = ggml_fp16_to_fp32(*w_ptr);
-                }
-            }
-        } else {
-            // FP32 weights
-            const float * weights_f32 = (const float *)src0->data;
-            GGML_ANE_LOG_DEBUG("src0 is FP32");
-            
-            for (int64_t n = 0; n < N; n++) {
-                for (int64_t k = 0; k < K; k++) {
-                    const float * w_ptr = (const float *)((const char *)weights_f32 + k * src0->nb[1] + n * src0->nb[0]);
-                    weights_transposed[n * K + k] = *w_ptr;
-                }
-            }
-        }
-        
-        // Debug: print first few weights
-        GGML_ANE_LOG_DEBUG("First 5 transposed weights: %.6f %.6f %.6f %.6f %.6f",
-                           weights_transposed[0], weights_transposed[1], weights_transposed[2],
-                           weights_transposed[3], weights_transposed[4]);
-        
-        NSData * weight_blob = ggml_ane_build_weight_blob(weights_transposed, N, K);
-        free(weights_transposed);
-        
-        GGML_ANE_LOG_DEBUG("Weight blob size: %zu bytes", [weight_blob length]);
-        
-        // Compile
-        size_t input_size = K * M * sizeof(float);
+        // Compile with 2 inputs: x [1, K, M] and W [1, N, K]
+        size_t input_sizes[2] = {
+            K * M * sizeof(float),  // x: [1, K, M]
+            N * K * sizeof(float)   // W: [1, N, K]
+        };
         size_t output_size = N * M * sizeof(float);
         
-        GGML_ANE_LOG_DEBUG("Buffer sizes: input=%zu, output=%zu", input_size, output_size);
+        GGML_ANE_LOG_DEBUG("Buffer sizes: x=%zu, W=%zu, y=%zu", 
+                           input_sizes[0], input_sizes[1], output_size);
         
         kernel = ggml_ane_compile_kernel(
             mil_cstr,
-            [weight_blob bytes],
-            [weight_blob length],
-            1, &input_size,
+            nullptr,  // No weight blob for matmul format
+            0,
+            2, input_sizes,   // 2 inputs
             1, &output_size,
             hash  // Cache key
         );
         
         if (!kernel) {
             GGML_ANE_LOG_ERROR("Failed to compile ANE kernel for MUL_MAT");
+            free(weights_transposed);
             return false;
         }
         
@@ -405,16 +404,19 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
             std::lock_guard<std::mutex> lock(g_matmul_kernels_mutex);
             g_matmul_kernels[hash] = kernel;
         }
+        
+        // Store transposed weights for this kernel (will be freed when kernel is freed)
+        // For now, we'll pass them directly in execute_mul_mat
     }
     
     // Prepare input data
     // src1 is [K, M] with strides nb[0], nb[1]
-    // ANE expects [1, K, 1, M] which in memory is [K, M] row-major
+    // ANE matmul expects [1, K, M] which in memory is [K, M] row-major
     // NOTE: src1 may be FP16 or FP32!
     
     GGML_ANE_LOG_DEBUG("src1 type: %d (F16=%d, F32=%d)", src1->type, GGML_TYPE_F16, GGML_TYPE_F32);
     
-    float * input_conv = (float *)malloc(K * M * sizeof(float));
+    float * input_x = (float *)malloc(K * M * sizeof(float));
     
     if (src1->type == GGML_TYPE_F16) {
         // FP16 input - need to convert to FP32
@@ -424,7 +426,7 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
         for (int64_t k = 0; k < K; k++) {
             for (int64_t m = 0; m < M; m++) {
                 const ggml_fp16_t * in_ptr = (const ggml_fp16_t *)((const char *)src1_f16 + k * src1->nb[1] + m * src1->nb[0]);
-                input_conv[k * M + m] = ggml_fp16_to_fp32(*in_ptr);
+                input_x[k * M + m] = ggml_fp16_to_fp32(*in_ptr);
             }
         }
     } else {
@@ -434,12 +436,12 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
         
         // Check if contiguous for fast path
         if (src1->nb[0] == sizeof(float) && src1->nb[1] == K * sizeof(float)) {
-            memcpy(input_conv, src1_f32, K * M * sizeof(float));
+            memcpy(input_x, src1_f32, K * M * sizeof(float));
         } else {
             for (int64_t k = 0; k < K; k++) {
                 for (int64_t m = 0; m < M; m++) {
                     const float * in_ptr = (const float *)((const char *)src1_f32 + k * src1->nb[1] + m * src1->nb[0]);
-                    input_conv[k * M + m] = *in_ptr;
+                    input_x[k * M + m] = *in_ptr;
                 }
             }
         }
@@ -447,33 +449,38 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     
     // Debug: print first few input values
     GGML_ANE_LOG_DEBUG("First 5 input values: %.6f %.6f %.6f %.6f %.6f",
-                       input_conv[0], input_conv[1], input_conv[2],
-                       input_conv[3], input_conv[4]);
+                       input_x[0], input_x[1], input_x[2],
+                       input_x[3], input_x[4]);
+    
+    // Prepare weights as second input
+    // weights_transposed is already [N, K] in row-major = [1, N, K]
+    float * input_w = weights_transposed;
     
     // Allocate output
-    float * output_conv = (float *)malloc(N * M * sizeof(float));
+    float * output = (float *)malloc(N * M * sizeof(float));
     
-    // Execute
-    const void * inputs[1] = { input_conv };
-    void * outputs[1] = { output_conv };
+    // Execute with 2 inputs
+    const void * inputs[2] = { input_x, input_w };
+    void * outputs[1] = { output };
     
     bool success = ggml_ane_execute(kernel, inputs, outputs);
     
     if (!success) {
         GGML_ANE_LOG_ERROR("ANE execution failed for MUL_MAT");
-        free(input_conv);
-        free(output_conv);
+        free(input_x);
+        free(input_w);
+        free(output);
         return false;
     }
     
     // Copy output to dst
-    // ANE output is [1, N, 1, M] row-major: element (0, n, 0, m) at n * M + m
-    // dst is [N, M] row-major: same layout!
+    // ANE output is [1, N, M] row-major: same as dst [N, M]
     float * dst_data = (float *)dst->data;
-    memcpy(dst_data, output_conv, N * M * sizeof(float));
+    memcpy(dst_data, output, N * M * sizeof(float));
     
-    free(input_conv);
-    free(output_conv);
+    free(input_x);
+    free(input_w);
+    free(output);
     
     GGML_ANE_LOG_DEBUG("MUL_MAT completed successfully");
     return true;

@@ -926,79 +926,31 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
             case GGML_OP_CONT:
             case GGML_OP_CPY:
                 // These ops must COPY data
+                // For both CONT and CPY: src = node->src[0], dst = node (the node IS the destination)
                 {
-                    struct ggml_tensor * src = node->src[0];
-                    // IMPORTANT: For both CONT and CPY, the destination is the node itself
-                    // The node's data pointer points to the destination buffer
-                    struct ggml_tensor * dst_t = node;
-                    
-                    GGML_ANE_LOG_DEBUG("CONT/CPY: src=%p (data=%p), dst=%p (data=%p), src1=%p", 
-                                       src, src ? src->data : NULL, dst_t, dst_t ? dst_t->data : NULL,
-                                       node->src[1]);
+                    const struct ggml_tensor * src = node->src[0];
+                    const struct ggml_tensor * dst_t = node;
                     
                     if (!src || !dst_t) {
-                        GGML_ANE_LOG_DEBUG("CONT/CPY: null src or dst");
+                        GGML_ANE_LOG_DEBUG("CONT/CPY: null tensor");
                         break;
                     }
                     if (!src->data || !dst_t->data) {
-                        GGML_ANE_LOG_DEBUG("CONT/CPY: null data pointer");
+                        GGML_ANE_LOG_DEBUG("CONT/CPY: null data");
                         break;
                     }
                     
-                    // Check dimensions match
-                    int64_t src_ne = src->ne[0] * src->ne[1] * src->ne[2] * src->ne[3];
-                    int64_t dst_ne = dst_t->ne[0] * dst_t->ne[1] * dst_t->ne[2] * dst_t->ne[3];
-                    GGML_ANE_LOG_DEBUG("CONT/CPY: src_ne=%ld, dst_ne=%ld", src_ne, dst_ne);
+                    // Use the destination's byte count (CONT makes it contiguous)
+                    const size_t nbytes = ggml_nbytes(dst_t);
                     
-                    // Simple contiguous copy - use total byte size
-                    size_t src_size = ggml_nbytes(src);
-                    size_t dst_size = ggml_nbytes(dst_t);
-                    
-                    if (src_size == 0 || dst_size == 0) {
-                        GGML_ANE_LOG_DEBUG("CONT/CPY: zero size");
+                    // Safety check
+                    if (nbytes == 0 || nbytes > 1024*1024*1024) {  // Max 1GB
+                        GGML_ANE_LOG_DEBUG("CONT/CPY: invalid size %zu", nbytes);
                         break;
                     }
                     
-                    // For CONT (make contiguous), we can do a simple memcpy
-                    // The destination is always contiguous after CONT
-                    if (node->op == GGML_OP_CONT || 
-                        (src->nb[0] == dst_t->nb[0] && src->nb[0] == sizeof(float))) {
-                        // Simple case: contiguous or same layout
-                        size_t copy_size = (src_size < dst_size) ? src_size : dst_size;
-                        memcpy(dst_t->data, src->data, copy_size);
-                        GGML_ANE_LOG_DEBUG("CONT/CPY: memcpy %zu bytes", copy_size);
-                    } else {
-                        // Complex case: use stride-based copy
-                        const int64_t ne0 = src->ne[0];
-                        const int64_t ne1 = src->ne[1];
-                        const int64_t ne2 = src->ne[2];
-                        const int64_t ne3 = src->ne[3];
-                        
-                        const int64_t nb0 = src->nb[0];
-                        const int64_t nb1 = src->nb[1];
-                        const int64_t nb2 = src->nb[2];
-                        const int64_t nb3 = src->nb[3];
-                        
-                        const int64_t dst_nb0 = dst_t->nb[0];
-                        const int64_t dst_nb1 = dst_t->nb[1];
-                        const int64_t dst_nb2 = dst_t->nb[2];
-                        const int64_t dst_nb3 = dst_t->nb[3];
-                        
-                        for (int64_t i3 = 0; i3 < ne3; i3++) {
-                            for (int64_t i2 = 0; i2 < ne2; i2++) {
-                                for (int64_t i1 = 0; i1 < ne1; i1++) {
-                                    const char * src_row = (const char *)src->data + i3*nb3 + i2*nb2 + i1*nb1;
-                                    char * dst_row = (char *)dst_t->data + i3*dst_nb3 + i2*dst_nb2 + i1*dst_nb1;
-                                    for (int64_t i0 = 0; i0 < ne0; i0++) {
-                                        const float * s = (const float *)(src_row + i0*nb0);
-                                        float * d = (float *)(dst_row + i0*dst_nb0);
-                                        *d = *s;
-                                    }
-                                }
-                            }
-                        }
-                        GGML_ANE_LOG_DEBUG("CONT/CPY: strided copy %ld elements", ne0*ne1*ne2*ne3);
-                    }
+                    // For CONT, destination is guaranteed contiguous, so simple memcpy works
+                    memcpy(dst_t->data, src->data, nbytes);
                 }
                 break;
                 

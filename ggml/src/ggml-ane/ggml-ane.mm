@@ -695,6 +695,15 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
     int supported_ops = 0;
     int unsupported_ops = 0;
     
+    // Pre-scan for UNARY ops (to track where NaN might originate)
+    for (int i = 0; i < cgraph->n_nodes; i++) {
+        struct ggml_tensor * node = cgraph->nodes[i];
+        if (node->op == GGML_OP_UNARY) {
+            GGML_ANE_LOG_INFO("GRAPH #%d contains UNARY at node[%d], unary_op=%d", 
+                             g_graph_count, i, node->op_params[0]);
+        }
+    }
+    
     // Analyze graph first
     for (int i = 0; i < cgraph->n_nodes; i++) {
         struct ggml_tensor * node = cgraph->nodes[i];
@@ -890,10 +899,19 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
                         break;
                     }
                     
-                    // Check input for NaN
-                    float first_val = *(float *)src->data;
-                    if (first_val != first_val) {
-                        GGML_ANE_LOG_WARN("UNARY: input is NaN! src op=%s", ggml_op_name(src->op));
+                    // Check input for NaN (scan first few elements with proper strides)
+                    int nan_count = 0;
+                    for (int check = 0; check < 5 && check < ne0; check++) {
+                        const char * check_ptr = (const char *)src->data + check * nb0;
+                        float val = *(const float *)check_ptr;
+                        if (val != val) {  // NaN check
+                            nan_count++;
+                        }
+                    }
+                    if (nan_count > 0) {
+                        GGML_ANE_LOG_WARN("UNARY: input has %d NaN in first 5 elements! src op=%s, dims=[%ld,%ld,%ld,%ld]", 
+                                         nan_count, ggml_op_name(src->op), ne0, ne1, ne2, ne3);
+                        GGML_ANE_LOG_WARN("UNARY: src strides: nb=[%ld,%ld,%ld,%ld]", nb0, nb1, nb2, nb3);
                     }
                     
                     const int64_t ne0 = src->ne[0];
@@ -972,6 +990,20 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
                             }
                         }
                     }
+                    
+                    // Check output for NaN
+                    int out_nan_count = 0;
+                    for (int check = 0; check < 5 && check < ne0; check++) {
+                        const char * check_ptr = (const char *)dst_t->data + check * dst_nb0;
+                        float val = *(const float *)check_ptr;
+                        if (val != val) {  // NaN check
+                            out_nan_count++;
+                        }
+                    }
+                    if (out_nan_count > 0) {
+                        GGML_ANE_LOG_WARN("UNARY: OUTPUT has %d NaN in first 5 elements! op=%d", out_nan_count, op_type);
+                    }
+                    
                     GGML_ANE_LOG_DEBUG("UNARY: op=%d, elements=%ld", op_type, ne0*ne1*ne2*ne3);
                 }
                 break;

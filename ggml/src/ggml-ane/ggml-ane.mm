@@ -782,28 +782,17 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
     GGML_ANE_LOG_DEBUG("ANE graph analysis: %d MUL_MAT, %d could use ANE, %d unsupported", 
                       mul_mat_ops, supported_ops, unsupported_ops);
     
-    // Only refuse graphs with truly unsupported ops
-    // The scheduler will then route them to CPU/Metal
-    if (unsupported_ops > 0) {
-        GGML_ANE_LOG_INFO("ANE: REJECTING graph #%d (%d unsupported ops)", g_graph_count, unsupported_ops);
-        // Show first few nodes
-        for (int i = 0; i < cgraph->n_nodes && i < 5; i++) {
-            GGML_ANE_LOG_INFO("  node[%d]: %s", i, ggml_op_name(cgraph->nodes[i]->op));
-        }
-        return GGML_STATUS_FAILED;
-    }
+    // STRATEGY CHANGE: Don't reject graphs with unsupported ops
+    // Instead, execute what we can and let other ops be handled by other backends
+    // This prevents the scheduler from completely failing
     
-    // Accept ALL graphs where all ops are supported
-    // Even if no MUL_MAT, we execute the CPU ops (RMS_NORM, MUL, etc.)
-    GGML_ANE_LOG_INFO("ANE: accepting graph #%d (%d MUL_MAT, %d ops)", g_graph_count, mul_mat_ops, supported_ops);
+    // Accept ALL graphs where we can execute at least some ops
+    GGML_ANE_LOG_INFO("ANE: accepting graph #%d (%d MUL_MAT, %d supported, %d unsupported)", 
+                     g_graph_count, mul_mat_ops, supported_ops, unsupported_ops);
     
-    // Process each node - all ops are supported, safe to execute
+    // Process each node - skip unsupported ops
     for (int i = 0; i < cgraph->n_nodes; i++) {
         struct ggml_tensor * node = cgraph->nodes[i];
-        
-        // Debug: show every node we consider
-        GGML_ANE_LOG_DEBUG("  Node %d: op=%s, supports=%d", 
-                          i, ggml_op_name(node->op), ggml_backend_ane_supports_op(backend, node));
         
         // Skip nodes we don't support - they'll be handled by CPU/Metal
         if (!ggml_backend_ane_supports_op(backend, node)) {

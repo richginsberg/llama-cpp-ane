@@ -185,6 +185,11 @@ static void ggml_ane_exec_mul(struct ggml_tensor * dst) {
     // Broadcast src1 dimensions
     const int64_t ne10 = src1->ne[0], ne11 = src1->ne[1], ne12 = src1->ne[2], ne13 = src1->ne[3];
     
+    // Debug: check inputs for NaN
+    float src0_first = *(const float *)src0->data;
+    float src1_first = *(const float *)src1->data;
+    GGML_ANE_LOG_DEBUG("MUL: src0[0]=%.6f, src1[0]=%.6f, ne00=%ld", src0_first, src1_first, ne00);
+    
     for (int64_t i03 = 0; i03 < ne03; i03++) {
         const int64_t i13 = i03 % ne13;
         for (int64_t i02 = 0; i02 < ne02; i02++) {
@@ -738,7 +743,11 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
                 break;
             
             case GGML_OP_MUL:
+                GGML_ANE_LOG_DEBUG("MUL: dst=%p, src0=%p, src1=%p", dst, dst->src[0], dst->src[1]);
                 ggml_ane_exec_mul(node);
+                // Check output
+                GGML_ANE_LOG_DEBUG("MUL result: dst[0]=%.6f, dst[1]=%.6f", 
+                                   *(float *)dst->data, *((float *)dst->data + 1));
                 break;
             
             case GGML_OP_RMS_NORM:

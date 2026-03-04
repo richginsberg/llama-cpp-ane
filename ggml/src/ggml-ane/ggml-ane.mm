@@ -442,16 +442,28 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
         for (int64_t k = 0; k < K; k++) {
             for (int64_t m = 0; m < M; m++) {
                 // src1[K, M]: element (k, m) at k*nb[0] + m*nb[1]
-                const float * in_ptr = (const float *)((const char *)src1_f32 + k * src1->nb[0] + m * src1->nb[1]);
+                size_t byte_offset = k * src1->nb[0] + m * src1->nb[1];
+                const float * in_ptr = (const float *)((const char *)src1_f32 + byte_offset);
                 // ANE: element (k, m) at k*M_padded + m
                 input_x[k * M_padded + m] = *in_ptr;
             }
         }
         
-        // Debug: show element indices for first few values
-        printf("[ANE DEBUG] src1->data=%p, first few elements:\n", (void *)src1_f32);
-        for (int i = 0; i < 10 && i < K * M; i++) {
-            printf("  [%d] = %.6f\n", i, src1_f32[i]);
+        // Debug: show what we're actually reading
+        printf("[ANE DEBUG] src1->data=%p, checking stride calculations:\n", (void *)src1_f32);
+        printf("[ANE DEBUG] src1 dimensions: ne[0]=%ld, ne[1]=%ld, nb[0]=%ld, nb[1]=%ld\n",
+               src1->ne[0], src1->ne[1], src1->nb[0], src1->nb[1]);
+        printf("[ANE DEBUG] Total src1 size: %ld bytes (%ld elements)\n", 
+               src1->ne[0] * src1->ne[1] * sizeof(float), src1->ne[0] * src1->ne[1]);
+        printf("[ANE DEBUG] Checking first few (k,m) reads:\n");
+        for (int64_t m = 0; m < 3 && m < M; m++) {
+            for (int64_t k = 0; k < 3 && k < K; k++) {
+                size_t byte_offset = k * src1->nb[0] + m * src1->nb[1];
+                size_t elem_offset = byte_offset / sizeof(float);
+                const float * in_ptr = (const float *)((const char *)src1_f32 + byte_offset);
+                printf("  (k=%ld,m=%ld): byte_offset=%zu, elem_offset=%zu, value=%.6f\n",
+                       k, m, byte_offset, elem_offset, *in_ptr);
+            }
         }
         printf("[ANE DEBUG] input_x first few elements:\n");
         for (int i = 0; i < 10 && i < K * M_padded; i++) {

@@ -800,6 +800,27 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
             
             case GGML_OP_MUL:
                 GGML_ANE_LOG_DEBUG("MUL: dst=%p, src0=%p, src1=%p", node, node->src[0], node->src[1]);
+                {
+                    // Check inputs BEFORE executing
+                    float src0_first = 0.0f, src1_first = 0.0f;
+                    if (node->src[0] && node->src[0]->data) {
+                        src0_first = *(float *)node->src[0]->data;
+                    }
+                    if (node->src[1] && node->src[1]->data) {
+                        src1_first = *(float *)node->src[1]->data;
+                    }
+                    GGML_ANE_LOG_DEBUG("MUL: src0[0]=%.6f, src1[0]=%.6f, ne00=%ld", 
+                                       src0_first, src1_first, node->src[0]->ne[0]);
+                    
+                    // Check if src0 is NaN before we execute
+                    if (src0_first != src0_first) {
+                        GGML_ANE_LOG_WARN("MUL: src0 is NaN before execution!");
+                        // Check if this tensor was produced by a previous op
+                        if (node->src[0]->op != GGML_OP_NONE) {
+                            GGML_ANE_LOG_WARN("MUL: src0 comes from op %s", ggml_op_name(node->src[0]->op));
+                        }
+                    }
+                }
                 ggml_ane_exec_mul(node);
                 {
                     float result = *(float *)node->data;

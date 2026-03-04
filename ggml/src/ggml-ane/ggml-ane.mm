@@ -836,6 +836,113 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
             case GGML_OP_TRANSPOSE:
                 // These ARE metadata ops - no data copy needed
                 break;
+            
+            case GGML_OP_CONT:
+            case GGML_OP_CPY:
+                // These ops must COPY data
+                {
+                    struct ggml_tensor * src = node->src[0];
+                    struct ggml_tensor * dst_t = node;
+                    
+                    if (!src || !dst_t) {
+                        break;
+                    }
+                    if (!src->data || !dst_t->data) {
+                        break;
+                    }
+                    
+                    const int64_t ne0 = src->ne[0];
+                    const int64_t ne1 = src->ne[1];
+                    const int64_t ne2 = src->ne[2];
+                    const int64_t ne3 = src->ne[3];
+                    
+                    const int64_t nb0 = src->nb[0];
+                    const int64_t nb1 = src->nb[1];
+                    const int64_t nb2 = src->nb[2];
+                    const int64_t nb3 = src->nb[3];
+                    
+                    const int64_t dst_nb0 = dst_t->nb[0];
+                    const int64_t dst_nb1 = dst_t->nb[1];
+                    const int64_t dst_nb2 = dst_t->nb[2];
+                    const int64_t dst_nb3 = dst_t->nb[3];
+                    
+                    int64_t total = ne0 * ne1 * ne2 * ne3;
+                    if (total == 0) {
+                        break;
+                    }
+                    
+                    // Handle different type combinations
+                    const bool src_is_f32 = (src->type == GGML_TYPE_F32);
+                    const bool dst_is_f32 = (dst_t->type == GGML_TYPE_F32);
+                    const bool src_is_f16 = (src->type == GGML_TYPE_F16);
+                    const bool dst_is_f16 = (dst_t->type == GGML_TYPE_F16);
+                    
+                    if (src_is_f32 && dst_is_f32) {
+                        // F32 to F32
+                        for (int64_t i3 = 0; i3 < ne3; i3++) {
+                            for (int64_t i2 = 0; i2 < ne2; i2++) {
+                                for (int64_t i1 = 0; i1 < ne1; i1++) {
+                                    const char * src_row = (const char *)src->data + i3*nb3 + i2*nb2 + i1*nb1;
+                                    char * dst_row = (char *)dst_t->data + i3*dst_nb3 + i2*dst_nb2 + i1*dst_nb1;
+                                    for (int64_t i0 = 0; i0 < ne0; i0++) {
+                                        const float * s = (const float *)(src_row + i0*nb0);
+                                        float * d = (float *)(dst_row + i0*dst_nb0);
+                                        *d = *s;
+                                    }
+                                }
+                            }
+                        }
+                    } else if (src_is_f16 && dst_is_f32) {
+                        // F16 to F32
+                        for (int64_t i3 = 0; i3 < ne3; i3++) {
+                            for (int64_t i2 = 0; i2 < ne2; i2++) {
+                                for (int64_t i1 = 0; i1 < ne1; i1++) {
+                                    const char * src_row = (const char *)src->data + i3*nb3 + i2*nb2 + i1*nb1;
+                                    char * dst_row = (char *)dst_t->data + i3*dst_nb3 + i2*dst_nb2 + i1*dst_nb1;
+                                    for (int64_t i0 = 0; i0 < ne0; i0++) {
+                                        const ggml_fp16_t * s = (const ggml_fp16_t *)(src_row + i0*nb0);
+                                        float * d = (float *)(dst_row + i0*dst_nb0);
+                                        *d = ggml_fp16_to_fp32(*s);
+                                    }
+                                }
+                            }
+                        }
+                    } else if (src_is_f32 && dst_is_f16) {
+                        // F32 to F16
+                        for (int64_t i3 = 0; i3 < ne3; i3++) {
+                            for (int64_t i2 = 0; i2 < ne2; i2++) {
+                                for (int64_t i1 = 0; i1 < ne1; i1++) {
+                                    const char * src_row = (const char *)src->data + i3*nb3 + i2*nb2 + i1*nb1;
+                                    char * dst_row = (char *)dst_t->data + i3*dst_nb3 + i2*dst_nb2 + i1*dst_nb1;
+                                    for (int64_t i0 = 0; i0 < ne0; i0++) {
+                                        const float * s = (const float *)(src_row + i0*nb0);
+                                        ggml_fp16_t * d = (ggml_fp16_t *)(dst_row + i0*dst_nb0);
+                                        *d = ggml_fp32_to_fp16(*s);
+                                    }
+                                }
+                            }
+                        }
+                    } else if (src_is_f16 && dst_is_f16) {
+                        // F16 to F16
+                        for (int64_t i3 = 0; i3 < ne3; i3++) {
+                            for (int64_t i2 = 0; i2 < ne2; i2++) {
+                                for (int64_t i1 = 0; i1 < ne1; i1++) {
+                                    const char * src_row = (const char *)src->data + i3*nb3 + i2*nb2 + i1*nb1;
+                                    char * dst_row = (char *)dst_t->data + i3*dst_nb3 + i2*dst_nb2 + i1*dst_nb1;
+                                    for (int64_t i0 = 0; i0 < ne0; i0++) {
+                                        const ggml_fp16_t * s = (const ggml_fp16_t *)(src_row + i0*nb0);
+                                        ggml_fp16_t * d = (ggml_fp16_t *)(dst_row + i0*dst_nb0);
+                                        *d = *s;
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        GGML_ANE_LOG_DEBUG("CONT/CPY: unsupported types src=%d dst=%d", src->type, dst_t->type);
+                    }
+                    GGML_ANE_LOG_DEBUG("CONT/CPY: copied %ld elements (src_type=%d, dst_type=%d)", total, src->type, dst_t->type);
+                }
+                break;
                 
             case GGML_OP_NONE:
                 // Skip placeholder
@@ -899,7 +1006,7 @@ static bool ggml_backend_ane_supports_op(ggml_backend_t backend, const struct gg
             return true;  // Metadata ops - no data movement
         case GGML_OP_CONT:
         case GGML_OP_CPY:
-            return false;  // Data copy ops - let CPU handle them
+            return true;  // We must support these to avoid NaN
         default:
             return false;
     }

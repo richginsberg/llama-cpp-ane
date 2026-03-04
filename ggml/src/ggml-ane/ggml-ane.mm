@@ -339,9 +339,13 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
         const float * weights = (const float *)src0->data;
         float * weights_transposed = (float *)malloc(N * K * sizeof(float));
         
+        GGML_ANE_LOG_DEBUG("src0: nb[0]=%ld, nb[1]=%ld, expected nb[1]=%ld", 
+                           src0->nb[0], src0->nb[1], K * sizeof(float));
+        
         // Handle potentially non-contiguous tensors
         if (src0->nb[0] == sizeof(float) && src0->nb[1] == K * sizeof(float)) {
             // Contiguous - fast path
+            GGML_ANE_LOG_DEBUG("src0 is contiguous, using fast transpose");
             for (int64_t n = 0; n < N; n++) {
                 for (int64_t k = 0; k < K; k++) {
                     weights_transposed[n * K + k] = weights[k * N + n];
@@ -349,7 +353,7 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
             }
         } else {
             // Non-contiguous - use strides
-            GGML_ANE_LOG_DEBUG("Non-contiguous src0: nb[0]=%ld, nb[1]=%ld", src0->nb[0], src0->nb[1]);
+            GGML_ANE_LOG_DEBUG("src0 is NON-contiguous, using stride-based transpose");
             for (int64_t n = 0; n < N; n++) {
                 for (int64_t k = 0; k < K; k++) {
                     const float * w_ptr = (const float *)((const char *)weights + k * src0->nb[1] + n * src0->nb[0]);
@@ -396,13 +400,17 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     float * input_conv = (float *)malloc(K * M * sizeof(float));
     const float * src1_data = (const float *)src1->data;
     
+    GGML_ANE_LOG_DEBUG("src1: nb[0]=%ld, nb[1]=%ld, expected nb[1]=%ld", 
+                       src1->nb[0], src1->nb[1], K * sizeof(float));
+    
     // Handle potentially non-contiguous tensors
     if (src1->nb[0] == sizeof(float) && src1->nb[1] == K * sizeof(float)) {
         // Contiguous - fast path
+        GGML_ANE_LOG_DEBUG("src1 is contiguous, using memcpy");
         memcpy(input_conv, src1_data, K * M * sizeof(float));
     } else {
         // Non-contiguous - use strides
-        GGML_ANE_LOG_DEBUG("Non-contiguous src1: nb[0]=%ld, nb[1]=%ld", src1->nb[0], src1->nb[1]);
+        GGML_ANE_LOG_DEBUG("src1 is NON-contiguous, using stride-based copy");
         for (int64_t k = 0; k < K; k++) {
             for (int64_t m = 0; m < M; m++) {
                 const float * in_ptr = (const float *)((const char *)src1_data + k * src1->nb[1] + m * src1->nb[0]);

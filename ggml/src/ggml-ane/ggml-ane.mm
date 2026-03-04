@@ -309,9 +309,11 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
         return false;  // < 64K elements, CPU is faster
     }
     
-    // Skip if too large for ANE SRAM (~32MB working set)
+    // Skip if too large for ANE SRAM
+    // ANE has ~16MB SRAM per core, but can spill to DRAM
+    // Allow up to 256MB for larger models (with DRAM spill)
     size_t working_set = K * N * 2 + K * M_padded * 2 + N * M_padded * 2;
-    if (working_set > 64 * 1024 * 1024) {  // 64MB limit (allow some spill)
+    if (working_set > 256 * 1024 * 1024) {  // 256MB limit
         GGML_ANE_LOG_DEBUG("MUL_MAT too large for ANE: %zu MB working set", working_set / (1024 * 1024));
         return false;
     }
@@ -439,10 +441,6 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
         GGML_ANE_LOG_DEBUG("src1 is FP32, transposing");
         
         // Transpose from ggml [K, M] to ANE [K, M_padded]
-        // IMPORTANT: src1 might be a view into a smaller buffer!
-        // Check if nb[1] * M exceeds the actual allocation
-        size_t required_size = M * src1->nb[1];
-        
         for (int64_t k = 0; k < K; k++) {
             for (int64_t m = 0; m < M; m++) {
                 // src1[K, M]: element (k, m) at k*nb[0] + m*nb[1]
@@ -451,29 +449,6 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
                 // ANE: element (k, m) at k*M_padded + m
                 input_x[k * M_padded + m] = *in_ptr;
             }
-        }
-        
-        // Debug: show what we're actually reading
-        printf("[ANE DEBUG] src1->data=%p, checking stride calculations:\n", (void *)src1_f32);
-        printf("[ANE DEBUG] src1 dimensions: ne[0]=%ld, ne[1]=%ld, nb[0]=%ld, nb[1]=%ld\n",
-               src1->ne[0], src1->ne[1], src1->nb[0], src1->nb[1]);
-        printf("[ANE DEBUG] Total required: %zu bytes (%ld elements)\n", 
-               required_size, src1->ne[0] * src1->ne[1]);
-        printf("[ANE DEBUG] Checking first few (k,m) reads:\n");
-        for (int64_t m = 0; m < 3 && m < M; m++) {
-            for (int64_t k = 0; k < 3 && k < K; k++) {
-                size_t byte_offset = k * src1->nb[0] + m * src1->nb[1];
-                size_t elem_offset = byte_offset / sizeof(float);
-                const float * in_ptr = (const float *)((const char *)src1_f32 + byte_offset);
-                float val = *in_ptr;
-                printf("  (k=%ld,m=%ld): byte_offset=%zu, elem_offset=%zu, value=%.6f%s\n",
-                       k, m, byte_offset, elem_offset, val, 
-                       (val != val) ? " [NaN!]" : "");  // NaN check
-            }
-        }
-        printf("[ANE DEBUG] input_x first few elements:\n");
-        for (int i = 0; i < 10 && i < K * M_padded; i++) {
-            printf("  [%d] = %.6f\n", i, input_x[i]);
         }
     }
     
@@ -580,9 +555,9 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
                 continue;
             }
             
-            // Check SRAM limit
+            // Check SRAM limit (allow up to 256MB with DRAM spill)
             size_t working_set = ne0 * ne1 * 2 + ne0 * M * 2 + ne1 * M * 2;
-            if (working_set > 64 * 1024 * 1024) {
+            if (working_set > 256 * 1024 * 1024) {
                 GGML_ANE_LOG_DEBUG("  MUL_MAT %d: too large (%zu MB)", i, working_set / (1024 * 1024));
                 unsupported_ops++;
                 continue;
@@ -697,9 +672,9 @@ static bool ggml_backend_ane_supports_op(ggml_backend_t backend, const struct gg
             // Skip small matrices (CPU is faster)
             if (ne0 * ne1 * M < 64 * 1024) return false;
             
-            // Check SRAM limit
+            // Check SRAM limit (allow up to 256MB with DRAM spill)
             size_t working_set = ne0 * ne1 * 2 + ne0 * M * 2 + ne1 * M * 2;
-            if (working_set > 64 * 1024 * 1024) return false;
+            if (working_set > 256 * 1024 * 1024) return false;
             
             return true;
         }

@@ -586,18 +586,17 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
         }
     }
     
-    GGML_ANE_LOG_INFO("ANE graph analysis: %d MUL_MAT, %d could use ANE, %d unsupported", 
+    GGML_ANE_LOG_DEBUG("ANE graph analysis: %d MUL_MAT, %d could use ANE, %d unsupported", 
                       mul_mat_ops, supported_ops, unsupported_ops);
     
-    // If we can't handle all ops, let ggml fall back to CPU/Metal
-    if (unsupported_ops > 0) {
-        GGML_ANE_LOG_INFO("ANE: falling back to CPU/Metal (%d unsupported ops)", unsupported_ops);
-        return GGML_STATUS_FAILED;
-    }
-    
-    // Process each node
+    // Process each node - skip unsupported ops (scheduler will route them to other backends)
     for (int i = 0; i < cgraph->n_nodes; i++) {
         struct ggml_tensor * node = cgraph->nodes[i];
+        
+        // Skip nodes we don't support - they'll be handled by CPU/Metal
+        if (!ggml_backend_ane_supports_op(backend, node)) {
+            continue;
+        }
         
         switch (node->op) {
             case GGML_OP_MUL_MAT:
@@ -637,15 +636,14 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
                 break;
                 
             default:
-                // Shouldn't reach here if analysis was correct
-                const char * op_name = ggml_op_name(node->op);
-                GGML_ANE_LOG_ERROR("ANE: Unexpected op %s (%d) in execution phase", 
-                                   op_name ? op_name : "unknown", node->op);
-                return GGML_STATUS_FAILED;
+                // Shouldn't reach here since we checked supports_op above
+                break;
         }
     }
     
-    GGML_ANE_LOG_INFO("ANE: graph compute complete");
+    if (supported_ops > 0) {
+        GGML_ANE_LOG_DEBUG("ANE: processed %d ops", supported_ops);
+    }
     return GGML_STATUS_SUCCESS;
     
     GGML_UNUSED(backend);

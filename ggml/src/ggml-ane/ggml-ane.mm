@@ -877,6 +877,41 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
     GGML_ANE_LOG_INFO("ANE: accepting graph #%d (%d MUL_MAT, %d supported, %d unsupported)", 
                      g_graph_count, mul_mat_ops, supported_ops, unsupported_ops);
     
+    // CRITICAL: Validate ALL input tensors BEFORE processing
+    // This will catch corruption from other backends
+    for (int i = 0; i < cgraph->n_nodes; i++) {
+        struct ggml_tensor * node = cgraph->nodes[i];
+        
+        // Check all source tensors
+        for (int s = 0; s < GGML_MAX_SRC; s++) {
+            struct ggml_tensor * src = node->src[s];
+            if (!src || !src->data) continue;
+            if (src->type != GGML_TYPE_F32) continue;  // Only check F32 for now
+            
+            // Check first 64 elements for NaN/Inf
+            int bad_count = 0;
+            int64_t ne0 = src->ne[0];
+            int64_t nb0 = src->nb[0];
+            for (int check = 0; check < 64 && check < ne0; check++) {
+                const char * ptr = (const char *)src->data + check * nb0;
+                float val = *(const float *)ptr;
+                if (val != val || val == INFINITY || val == -INFINITY) {  // NaN or Inf
+                    bad_count++;
+                }
+            }
+            
+            if (bad_count > 0) {
+                GGML_ANE_LOG_WARN(">>> GRAPH #%d: node[%d] src[%d] has %d bad values (NaN/Inf) in first 64 elements!", 
+                                 g_graph_count, i, s, bad_count);
+                GGML_ANE_LOG_WARN("    src tensor: op=%s, dims=[%ld,%ld,%ld,%ld], data=%p",
+                                 src->op == GGML_OP_NONE ? "NONE/LEAF" : ggml_op_name(src->op),
+                                 (long)src->ne[0], (long)src->ne[1], (long)src->ne[2], (long)src->ne[3],
+                                 src->data);
+                GGML_ANE_LOG_WARN("    dest node: op=%s", ggml_op_name(node->op));
+            }
+        }
+    }
+    
     // Process each node - skip unsupported ops
     for (int i = 0; i < cgraph->n_nodes; i++) {
         struct ggml_tensor * node = cgraph->nodes[i];

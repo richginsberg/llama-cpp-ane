@@ -401,39 +401,36 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     }
     
     // Prepare input data
-    // src1 is [K, M] with strides nb[0], nb[1]
-    // ANE matmul expects [1, K, M] which in memory is [K, M] row-major
-    // NOTE: src1 may be FP16 or FP32!
+    // src1 is [K, M] in ggml layout: element (k, m) at offset m*K + k
+    // ANE expects [1, K, 1, M] in NCHW: element (k, m) at offset k*M + m
+    // We need to TRANSPOSE!
     
     GGML_ANE_LOG_DEBUG("src1 type: %d (F16=%d, F32=%d)", src1->type, GGML_TYPE_F16, GGML_TYPE_F32);
     
     float * input_x = (float *)malloc(K * M * sizeof(float));
     
     if (src1->type == GGML_TYPE_F16) {
-        // FP16 input - need to convert to FP32
         const ggml_fp16_t * src1_f16 = (const ggml_fp16_t *)src1->data;
-        GGML_ANE_LOG_DEBUG("src1 is FP16, converting to FP32");
+        GGML_ANE_LOG_DEBUG("src1 is FP16, converting to FP32 and transposing");
         
+        // Transpose from ggml [K, M] (m*K+k) to ANE [1, K, 1, M] (k*M+m)
         for (int64_t k = 0; k < K; k++) {
             for (int64_t m = 0; m < M; m++) {
-                const ggml_fp16_t * in_ptr = (const ggml_fp16_t *)((const char *)src1_f16 + k * src1->nb[1] + m * src1->nb[0]);
+                // In ggml: element (k, m) at offset m * nb[1] / sizeof + k * nb[0] / sizeof
+                // For contiguous: m * K + k
+                const ggml_fp16_t * in_ptr = (const ggml_fp16_t *)((const char *)src1_f16 + m * src1->nb[1] + k * src1->nb[0]);
                 input_x[k * M + m] = ggml_fp16_to_fp32(*in_ptr);
             }
         }
     } else {
-        // FP32 input
         const float * src1_f32 = (const float *)src1->data;
-        GGML_ANE_LOG_DEBUG("src1 is FP32");
+        GGML_ANE_LOG_DEBUG("src1 is FP32, transposing");
         
-        // Check if contiguous for fast path
-        if (src1->nb[0] == sizeof(float) && src1->nb[1] == K * sizeof(float)) {
-            memcpy(input_x, src1_f32, K * M * sizeof(float));
-        } else {
-            for (int64_t k = 0; k < K; k++) {
-                for (int64_t m = 0; m < M; m++) {
-                    const float * in_ptr = (const float *)((const char *)src1_f32 + k * src1->nb[1] + m * src1->nb[0]);
-                    input_x[k * M + m] = *in_ptr;
-                }
+        // Transpose from ggml [K, M] (m*K+k) to ANE [1, K, 1, M] (k*M+m)
+        for (int64_t k = 0; k < K; k++) {
+            for (int64_t m = 0; m < M; m++) {
+                const float * in_ptr = (const float *)((const char *)src1_f32 + m * src1->nb[1] + k * src1->nb[0]);
+                input_x[k * M + m] = *in_ptr;
             }
         }
     }
@@ -459,10 +456,18 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
         return false;
     }
     
-    // Copy output to dst
-    // ANE output is [1, N, 1, M] row-major: same as dst [N, M]
+    // Copy output to dst with transpose
+    // ANE output is [1, N, 1, M] in NCHW: element (n, m) at offset n*M + m
+    // ggml dst is [N, M]: element (n, m) at offset m*N + n (since ne[0]=N, ne[1]=M)
     float * dst_data = (float *)dst->data;
-    memcpy(dst_data, output, N * M * sizeof(float));
+    for (int64_t n = 0; n < N; n++) {
+        for (int64_t m = 0; m < M; m++) {
+            // ANE: output[n * M + m]
+            // ggml: dst_data[m * N + n]  (or with strides: m * nb[1] + n * nb[0])
+            float * dst_ptr = (float *)((char *)dst_data + m * dst->nb[1] + n * dst->nb[0]);
+            *dst_ptr = output[n * M + m];
+        }
+    }
     
     free(input_x);
     free(output);

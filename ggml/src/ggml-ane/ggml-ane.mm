@@ -39,8 +39,7 @@ extern "C" bool ggml_ane_device_init(void);
 // Kernel Cache
 ////////////////////////////////////////////////////////////////////////////////
 
-static std::map<uint64_t, ggml_ane_kernel_t> g_matmul_kernels;
-static std::mutex g_matmul_kernels_mutex;
+static bool g_debug_enabled = false;
 static int g_graph_count = 0;  // Global graph counter
 static int g_first_nan_graph = -1;  // First graph where NaN was detected
 
@@ -922,105 +921,77 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
                 // These ops must COPY data
                 {
                     struct ggml_tensor * src = node->src[0];
+                    // IMPORTANT: For both CONT and CPY, the destination is the node itself
+                    // The node's data pointer points to the destination buffer
                     struct ggml_tensor * dst_t = node;
                     
+                    GGML_ANE_LOG_DEBUG("CONT/CPY: src=%p (data=%p), dst=%p (data=%p), src1=%p", 
+                                       src, src ? src->data : NULL, dst_t, dst_t ? dst_t->data : NULL,
+                                       node->src[1]);
+                    
                     if (!src || !dst_t) {
+                        GGML_ANE_LOG_DEBUG("CONT/CPY: null src or dst");
                         break;
                     }
                     if (!src->data || !dst_t->data) {
+                        GGML_ANE_LOG_DEBUG("CONT/CPY: null data pointer");
                         break;
                     }
                     
-                    const int64_t ne0 = src->ne[0];
-                    const int64_t ne1 = src->ne[1];
-                    const int64_t ne2 = src->ne[2];
-                    const int64_t ne3 = src->ne[3];
+                    // Check dimensions match
+                    int64_t src_ne = src->ne[0] * src->ne[1] * src->ne[2] * src->ne[3];
+                    int64_t dst_ne = dst_t->ne[0] * dst_t->ne[1] * dst_t->ne[2] * dst_t->ne[3];
+                    GGML_ANE_LOG_DEBUG("CONT/CPY: src_ne=%ld, dst_ne=%ld", src_ne, dst_ne);
                     
-                    const int64_t nb0 = src->nb[0];
-                    const int64_t nb1 = src->nb[1];
-                    const int64_t nb2 = src->nb[2];
-                    const int64_t nb3 = src->nb[3];
+                    // Simple contiguous copy - use total byte size
+                    size_t src_size = ggml_nbytes(src);
+                    size_t dst_size = ggml_nbytes(dst_t);
                     
-                    const int64_t dst_nb0 = dst_t->nb[0];
-                    const int64_t dst_nb1 = dst_t->nb[1];
-                    const int64_t dst_nb2 = dst_t->nb[2];
-                    const int64_t dst_nb3 = dst_t->nb[3];
-                    
-                    int64_t total = ne0 * ne1 * ne2 * ne3;
-                    if (total == 0) {
+                    if (src_size == 0 || dst_size == 0) {
+                        GGML_ANE_LOG_DEBUG("CONT/CPY: zero size");
                         break;
                     }
                     
-                    // Handle different type combinations
-                    const bool src_is_f32 = (src->type == GGML_TYPE_F32);
-                    const bool dst_is_f32 = (dst_t->type == GGML_TYPE_F32);
-                    const bool src_is_f16 = (src->type == GGML_TYPE_F16);
-                    const bool dst_is_f16 = (dst_t->type == GGML_TYPE_F16);
-                    
-                    if (src_is_f32 && dst_is_f32) {
-                        // F32 to F32
-                        for (int64_t i3 = 0; i3 < ne3; i3++) {
-                            for (int64_t i2 = 0; i2 < ne2; i2++) {
-                                for (int64_t i1 = 0; i1 < ne1; i1++) {
-                                    const char * src_row = (const char *)src->data + i3*nb3 + i2*nb2 + i1*nb1;
-                                    char * dst_row = (char *)dst_t->data + i3*dst_nb3 + i2*dst_nb2 + i1*dst_nb1;
-                                    for (int64_t i0 = 0; i0 < ne0; i0++) {
-                                        const float * s = (const float *)(src_row + i0*nb0);
-                                        float * d = (float *)(dst_row + i0*dst_nb0);
-                                        *d = *s;
-                                    }
-                                }
-                            }
-                        }
-                    } else if (src_is_f16 && dst_is_f32) {
-                        // F16 to F32
-                        for (int64_t i3 = 0; i3 < ne3; i3++) {
-                            for (int64_t i2 = 0; i2 < ne2; i2++) {
-                                for (int64_t i1 = 0; i1 < ne1; i1++) {
-                                    const char * src_row = (const char *)src->data + i3*nb3 + i2*nb2 + i1*nb1;
-                                    char * dst_row = (char *)dst_t->data + i3*dst_nb3 + i2*dst_nb2 + i1*dst_nb1;
-                                    for (int64_t i0 = 0; i0 < ne0; i0++) {
-                                        const ggml_fp16_t * s = (const ggml_fp16_t *)(src_row + i0*nb0);
-                                        float * d = (float *)(dst_row + i0*dst_nb0);
-                                        *d = ggml_fp16_to_fp32(*s);
-                                    }
-                                }
-                            }
-                        }
-                    } else if (src_is_f32 && dst_is_f16) {
-                        // F32 to F16
-                        for (int64_t i3 = 0; i3 < ne3; i3++) {
-                            for (int64_t i2 = 0; i2 < ne2; i2++) {
-                                for (int64_t i1 = 0; i1 < ne1; i1++) {
-                                    const char * src_row = (const char *)src->data + i3*nb3 + i2*nb2 + i1*nb1;
-                                    char * dst_row = (char *)dst_t->data + i3*dst_nb3 + i2*dst_nb2 + i1*dst_nb1;
-                                    for (int64_t i0 = 0; i0 < ne0; i0++) {
-                                        const float * s = (const float *)(src_row + i0*nb0);
-                                        ggml_fp16_t * d = (ggml_fp16_t *)(dst_row + i0*dst_nb0);
-                                        *d = ggml_fp32_to_fp16(*s);
-                                    }
-                                }
-                            }
-                        }
-                    } else if (src_is_f16 && dst_is_f16) {
-                        // F16 to F16
-                        for (int64_t i3 = 0; i3 < ne3; i3++) {
-                            for (int64_t i2 = 0; i2 < ne2; i2++) {
-                                for (int64_t i1 = 0; i1 < ne1; i1++) {
-                                    const char * src_row = (const char *)src->data + i3*nb3 + i2*nb2 + i1*nb1;
-                                    char * dst_row = (char *)dst_t->data + i3*dst_nb3 + i2*dst_nb2 + i1*dst_nb1;
-                                    for (int64_t i0 = 0; i0 < ne0; i0++) {
-                                        const ggml_fp16_t * s = (const ggml_fp16_t *)(src_row + i0*nb0);
-                                        ggml_fp16_t * d = (ggml_fp16_t *)(dst_row + i0*dst_nb0);
-                                        *d = *s;
-                                    }
-                                }
-                            }
-                        }
+                    // For CONT (make contiguous), we can do a simple memcpy
+                    // The destination is always contiguous after CONT
+                    if (node->op == GGML_OP_CONT || 
+                        (src->nb[0] == dst_t->nb[0] && src->nb[0] == sizeof(float))) {
+                        // Simple case: contiguous or same layout
+                        size_t copy_size = (src_size < dst_size) ? src_size : dst_size;
+                        memcpy(dst_t->data, src->data, copy_size);
+                        GGML_ANE_LOG_DEBUG("CONT/CPY: memcpy %zu bytes", copy_size);
                     } else {
-                        GGML_ANE_LOG_DEBUG("CONT/CPY: unsupported types src=%d dst=%d", src->type, dst_t->type);
+                        // Complex case: use stride-based copy
+                        const int64_t ne0 = src->ne[0];
+                        const int64_t ne1 = src->ne[1];
+                        const int64_t ne2 = src->ne[2];
+                        const int64_t ne3 = src->ne[3];
+                        
+                        const int64_t nb0 = src->nb[0];
+                        const int64_t nb1 = src->nb[1];
+                        const int64_t nb2 = src->nb[2];
+                        const int64_t nb3 = src->nb[3];
+                        
+                        const int64_t dst_nb0 = dst_t->nb[0];
+                        const int64_t dst_nb1 = dst_t->nb[1];
+                        const int64_t dst_nb2 = dst_t->nb[2];
+                        const int64_t dst_nb3 = dst_t->nb[3];
+                        
+                        for (int64_t i3 = 0; i3 < ne3; i3++) {
+                            for (int64_t i2 = 0; i2 < ne2; i2++) {
+                                for (int64_t i1 = 0; i1 < ne1; i1++) {
+                                    const char * src_row = (const char *)src->data + i3*nb3 + i2*nb2 + i1*nb1;
+                                    char * dst_row = (char *)dst_t->data + i3*dst_nb3 + i2*dst_nb2 + i1*dst_nb1;
+                                    for (int64_t i0 = 0; i0 < ne0; i0++) {
+                                        const float * s = (const float *)(src_row + i0*nb0);
+                                        float * d = (float *)(dst_row + i0*dst_nb0);
+                                        *d = *s;
+                                    }
+                                }
+                            }
+                        }
+                        GGML_ANE_LOG_DEBUG("CONT/CPY: strided copy %ld elements", ne0*ne1*ne2*ne3);
                     }
-                    GGML_ANE_LOG_DEBUG("CONT/CPY: copied %ld elements (src_type=%d, dst_type=%d)", total, src->type, dst_t->type);
                 }
                 break;
                 

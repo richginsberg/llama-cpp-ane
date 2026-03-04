@@ -773,22 +773,15 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
     GGML_ANE_LOG_DEBUG("ANE graph analysis: %d MUL_MAT, %d could use ANE, %d unsupported", 
                       mul_mat_ops, supported_ops, unsupported_ops);
     
-    // STRATEGY: Only accept graphs where we can run ALL ops on ANE
-    // If any op is unsupported, let the scheduler route the entire graph to CPU/Metal
-    // This ensures correct execution even if scheduler doesn't handle FAILED properly
-    
+    // Only refuse graphs with truly unsupported ops
+    // The scheduler will then route them to CPU/Metal
     if (unsupported_ops > 0) {
         GGML_ANE_LOG_INFO("ANE: skipping graph #%d (%d unsupported ops)", g_graph_count, unsupported_ops);
         return GGML_STATUS_FAILED;
     }
     
-    // Additional check: Only accept graphs with at least one MUL_MAT
-    // (Pure CPU-op graphs should go to CPU backend)
-    if (mul_mat_ops == 0) {
-        GGML_ANE_LOG_DEBUG("ANE: skipping graph #%d (no MUL_MAT ops)", g_graph_count);
-        return GGML_STATUS_FAILED;
-    }
-    
+    // Accept ALL graphs where all ops are supported
+    // Even if no MUL_MAT, we execute the CPU ops (RMS_NORM, MUL, etc.)
     GGML_ANE_LOG_INFO("ANE: accepting graph #%d (%d MUL_MAT, %d ops)", g_graph_count, mul_mat_ops, supported_ops);
     
     // Process each node - all ops are supported, safe to execute

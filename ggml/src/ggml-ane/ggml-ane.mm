@@ -364,10 +364,6 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
                 }
             }
         }
-                    weights_transposed[n * K + k] = *w_ptr;
-                }
-            }
-        }
         
         GGML_ANE_LOG_DEBUG("First 5 transposed weights: %.6f %.6f %.6f %.6f %.6f",
                            weights_transposed[0], weights_transposed[1], weights_transposed[2],

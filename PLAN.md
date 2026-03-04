@@ -1,6 +1,60 @@
 # ANE Backend for llama.cpp
 
-**Goal:** Replace CoreML abstraction with direct `_ANEClient` API for 2-4× faster inference on Apple Silicon.
+**Status:** ✅ **Functional** - First prompt works at 419.8 t/s | ❌ **NaN cascade** in subsequent turns
+
+**Latest commit:** `4f0a45689` - debug: Add position 33 specific logging to MUL
+
+## Current Status
+
+### ✅ Working
+- **ANE device registration** - Shows in device list
+- **Model loading** - Weights accessible via unified memory  
+- **MUL_MAT on ANE** - Conv-based MIL execution works
+- **First prompt** - 419.8 t/s prompt, 133.5 t/s generation
+- **CPU ops** - ADD, MUL, RMS_NORM, SOFTMAX with stride-based indexing
+- **Type conversion** - F16↔F32 support in CPY/CONT
+- **Graph acceptance** - Execute supported ops, skip unsupported
+
+### ❌ Known Issues
+
+#### NaN Cascade (CRITICAL)
+- **Symptom:** Subsequent turns produce NaN, falling back to CPU (10-25 t/s)
+- **Root cause:** GRAPH #1 MUL produces NaN at position 33
+- **Pattern:** NaN propagates through 200+ graphs
+- **Impact:** Performance degrades from 100+ t/s to 10-25 t/s
+
+#### Current Investigation
+```
+GRAPH #1:
+  RMS_NORM → MUL (produces NaN at pos 33 in 1024x2x1x1 tensor)
+  
+GRAPH #2:
+  MUL_MAT input has NaN at position 528
+  
+GRAPH #9+:
+  NaN cascades to position 0, corrupting all subsequent ops
+```
+
+### 🎯 Next Steps
+1. **Debug MUL at position 33** - Check src1 broadcasting and memory access
+2. **Fix NaN source** - Ensure correct stride calculations
+3. **Verify broadcasting** - Check src1 dimensions and bounds
+4. **Performance target** - Once fixed, expect 100+ t/s generation
+
+## Build & Test
+
+```bash
+cd /home/machinelearning/.openclaw/workspace/llama-cpp-ane
+git pull
+cmake --build build -j8
+./build/bin/llama-cli -m ~/Downloads/models/Qwen3.5-0.8B-F16.gguf -p "Hello" -n 20 -cnv
+```
+
+**Expected output:**
+- First prompt: 400+ t/s ✓
+- Subsequent turns: NaN cascade, 10-25 t/s ✗
+
+---
 
 ## Architecture Overview
 

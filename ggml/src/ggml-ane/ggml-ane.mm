@@ -639,15 +639,29 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
         return GGML_STATUS_FAILED;
     }
     
-    GGML_ANE_LOG_INFO("ANE graph compute: analyzing %d nodes...", cgraph->n_nodes);
+    GGML_ANE_LOG_INFO("=== ANE GRAPH START: %d nodes ===", cgraph->n_nodes);
     
     // Debug: show inputs to this graph
     GGML_ANE_LOG_DEBUG("Graph inputs (leaf nodes):");
-    for (int i = 0; i < cgraph->n_leafs; i++) {
+    for (int i = 0; i < cgraph->n_leafs && i < 5; i++) {  // Limit to first 5
         struct ggml_tensor * leaf = cgraph->leafs[i];
         if (leaf && leaf->data) {
             float first_val = *(float *)leaf->data;
-            GGML_ANE_LOG_DEBUG("  leaf[%d]: %s, data[0]=%.6f", i, leaf->name, first_val);
+            GGML_ANE_LOG_DEBUG("  leaf[%d]: %s, data[0]=%.6f, ne=[%ld,%ld,%ld,%ld]", 
+                               i, leaf->name[0] ? leaf->name : "?", first_val,
+                               leaf->ne[0], leaf->ne[1], leaf->ne[2], leaf->ne[3]);
+        }
+    }
+    
+    // Debug: show first node's inputs
+    if (cgraph->n_nodes > 0) {
+        struct ggml_tensor * first = cgraph->nodes[0];
+        GGML_ANE_LOG_DEBUG("First node: op=%s", ggml_op_name(first->op));
+        if (first->src[0] && first->src[0]->data) {
+            GGML_ANE_LOG_DEBUG("  src0[0]=%.6f", *(float *)first->src[0]->data);
+        }
+        if (first->src[1] && first->src[1]->data) {
+            GGML_ANE_LOG_DEBUG("  src1[0]=%.6f", *(float *)first->src[1]->data);
         }
     }
     
@@ -803,6 +817,7 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
     if (supported_ops > 0) {
         GGML_ANE_LOG_DEBUG("ANE: processed %d ops", supported_ops);
     }
+    GGML_ANE_LOG_INFO("=== ANE GRAPH END ===");
     return GGML_STATUS_SUCCESS;
     
     GGML_UNUSED(backend);

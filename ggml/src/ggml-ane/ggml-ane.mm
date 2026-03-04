@@ -156,14 +156,16 @@ static void ggml_ane_exec_add(struct ggml_tensor * dst) {
             for (int64_t i01 = 0; i01 < ne01; i01++) {
                 const int64_t i11 = i01 % ne11;
                 
-                float * dst_ptr = (float *)((char *)dst->data + i03*nb3 + i02*nb2 + i01*nb1);
-                const float * src0_ptr = (const float *)((const char *)src0->data + i03*nb03 + i02*nb02 + i01*nb01);
+                char * dst_row = (char *)dst->data + i03*nb3 + i02*nb2 + i01*nb1;
+                const char * src0_row = (const char *)src0->data + i03*nb03 + i02*nb02 + i01*nb01;
                 const char * src1_base = (const char *)src1->data + i13*nb13 + i12*nb12 + i11*nb11;
                 
                 for (int64_t i00 = 0; i00 < ne00; i00++) {
                     const int64_t i10 = i00 % ne10;
                     const float * src1_ptr = (const float *)(src1_base + i10*nb10);
-                    dst_ptr[i00] = src0_ptr[i00] + *src1_ptr;
+                    float * dst_ptr = (float *)(dst_row + i00*nb0);
+                    const float * src0_ptr = (const float *)(src0_row + i00*nb00);
+                    *dst_ptr = *src0_ptr + *src1_ptr;
                 }
             }
         }
@@ -190,14 +192,16 @@ static void ggml_ane_exec_mul(struct ggml_tensor * dst) {
             for (int64_t i01 = 0; i01 < ne01; i01++) {
                 const int64_t i11 = i01 % ne11;
                 
-                float * dst_ptr = (float *)((char *)dst->data + i03*nb3 + i02*nb2 + i01*nb1);
-                const float * src0_ptr = (const float *)((const char *)src0->data + i03*nb03 + i02*nb02 + i01*nb01);
+                char * dst_row = (char *)dst->data + i03*nb3 + i02*nb2 + i01*nb1;
+                const char * src0_row = (const char *)src0->data + i03*nb03 + i02*nb02 + i01*nb01;
                 const char * src1_base = (const char *)src1->data + i13*nb13 + i12*nb12 + i11*nb11;
                 
                 for (int64_t i00 = 0; i00 < ne00; i00++) {
                     const int64_t i10 = i00 % ne10;
                     const float * src1_ptr = (const float *)(src1_base + i10*nb10);
-                    dst_ptr[i00] = src0_ptr[i00] * *src1_ptr;
+                    float * dst_ptr = (float *)(dst_row + i00*nb0);
+                    const float * src0_ptr = (const float *)(src0_row + i00*nb00);
+                    *dst_ptr = *src0_ptr * *src1_ptr;
                 }
             }
         }

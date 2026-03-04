@@ -451,6 +451,18 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
                 input_x[k * M_padded + m] = *in_ptr;
             }
         }
+        
+        // Debug: show element indices for first few values
+        if (GGML_ANE_DEBUG_ENABLED) {
+            printf("[ANE DEBUG] src1->data=%p, first few elements:\n", src1_f32);
+            for (int i = 0; i < 10 && i < K * M; i++) {
+                printf("  [%d] = %.6f\n", i, src1_f32[i]);
+            }
+            printf("[ANE DEBUG] input_x first few elements:\n");
+            for (int i = 0; i < 10 && i < K * M_padded; i++) {
+                printf("  [%d] = %.6f\n", i, input_x[i]);
+            }
+        }
     }
     
     // Debug: print first few input values

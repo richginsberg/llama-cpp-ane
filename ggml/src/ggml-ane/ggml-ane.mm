@@ -28,6 +28,9 @@
 // External declarations (from ggml-ane-device.mm)
 ////////////////////////////////////////////////////////////////////////////////
 
+// Forward declaration
+static bool ggml_backend_ane_supports_op(ggml_backend_t backend, const struct ggml_tensor * op);
+
 extern "C" struct ggml_backend_device g_ane_device;
 extern "C" bool g_ane_device_initialized;
 extern "C" bool ggml_ane_device_init(void);

@@ -951,6 +951,33 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
                 break;
             
             case GGML_OP_RMS_NORM:
+                {
+                    struct ggml_tensor * src = node->src[0];
+                    
+                    // Debug: check input for -inf before processing
+                    const int64_t ne00 = src->ne[0];
+                    const int64_t nb00 = src->nb[0];
+                    if (src->data && ne00 > 33) {
+                        // Check position 33 specifically
+                        const char * ptr33 = (const char *)src->data + 33 * nb00;
+                        float val33 = *(const float *)ptr33;
+                        if (val33 == -INFINITY || val33 == INFINITY || val33 != val33) {
+                            GGML_ANE_LOG_WARN("RMS_NORM: INPUT at pos 33 is %.6f! Checking source...", val33);
+                            // Scan first 40 elements to see pattern
+                            GGML_ANE_LOG_WARN("First 40 input values:");
+                            for (int i = 0; i < 40 && i < ne00; i++) {
+                                const char * ptr = (const char *)src->data + i * nb00;
+                                float v = *(const float *)ptr;
+                                fprintf(stderr, " [%d]=%.6f", i, v);
+                            }
+                            fprintf(stderr, "\n");
+                            GGML_ANE_LOG_WARN("Source tensor: op=%s, dims=[%ld,%ld,%ld,%ld], data=%p",
+                                             src->op == GGML_OP_NONE ? "NONE/LEAF" : ggml_op_name(src->op),
+                                             src->ne[0], src->ne[1], src->ne[2], src->ne[3], src->data);
+                        }
+                    }
+                }
+                
                 GGML_ANE_LOG_DEBUG("RMS_NORM: src=%p, src[0]=%.6f, ne00=%ld", 
                                    node->src[0], *(float *)node->src[0]->data, node->src[0]->ne[0]);
                 ggml_ane_exec_rms_norm(node);

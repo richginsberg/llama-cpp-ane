@@ -641,6 +641,16 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
     
     GGML_ANE_LOG_INFO("ANE graph compute: analyzing %d nodes...", cgraph->n_nodes);
     
+    // Debug: show inputs to this graph
+    GGML_ANE_LOG_DEBUG("Graph inputs (leaf nodes):");
+    for (int i = 0; i < cgraph->n_leafs; i++) {
+        struct ggml_tensor * leaf = cgraph->leafs[i];
+        if (leaf && leaf->data) {
+            float first_val = *(float *)leaf->data;
+            GGML_ANE_LOG_DEBUG("  leaf[%d]: %s, data[0]=%.6f", i, leaf->name, first_val);
+        }
+    }
+    
     int mul_mat_ops = 0;
     int supported_ops = 0;
     int unsupported_ops = 0;
@@ -727,8 +737,11 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
         
         // Skip nodes we don't support - they'll be handled by CPU/Metal
         if (!ggml_backend_ane_supports_op(backend, node)) {
+            GGML_ANE_LOG_DEBUG("  Skipping unsupported op %d: %s", i, ggml_op_name(node->op));
             continue;
         }
+        
+        GGML_ANE_LOG_DEBUG("  Executing op %d: %s", i, ggml_op_name(node->op));
         
         switch (node->op) {
             case GGML_OP_MUL_MAT:

@@ -319,6 +319,18 @@ ggml_ane_kernel_t ggml_ane_compile_kernel(
             return nullptr;
         }
         
+        // Debug: verify IOSurface sizes
+        for (int i = 0; i < n_inputs; i++) {
+            size_t surface_size = IOSurfaceGetAllocSize(kernel->ioInputs[i]);
+            GGML_ANE_LOG_DEBUG("IOSurface input[%d]: allocated=%zu, expected=%zu", 
+                               i, surface_size, input_sizes[i]);
+        }
+        for (int i = 0; i < n_outputs; i++) {
+            size_t surface_size = IOSurfaceGetAllocSize(kernel->ioOutputs[i]);
+            GGML_ANE_LOG_DEBUG("IOSurface output[%d]: allocated=%zu, expected=%zu", 
+                               i, surface_size, output_sizes[i]);
+        }
+        
         // Cache if hash provided
         if (hash != 0) {
             std::lock_guard<std::mutex> lock(g_kernel_cache_mutex);
@@ -346,6 +358,11 @@ void ggml_ane_write_input(ggml_ane_kernel_t kernel, int index, const void * data
                           bytes, kernel->inputBytes[index]);
         bytes = kernel->inputBytes[index];
     }
+    
+    // Debug: print first few bytes being written
+    const float * fdata = (const float *)data;
+    GGML_ANE_LOG_DEBUG("Writing input[%d]: %zu bytes, first values: %.6f %.6f %.6f %.6f %.6f",
+                       index, bytes, fdata[0], fdata[1], fdata[2], fdata[3], fdata[4]);
     
     IOSurfaceLock(kernel->ioInputs[index], 0, NULL);
     memcpy(IOSurfaceGetBaseAddress(kernel->ioInputs[index]), data, bytes);

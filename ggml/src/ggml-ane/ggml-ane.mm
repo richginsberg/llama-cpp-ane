@@ -773,12 +773,23 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
     GGML_ANE_LOG_DEBUG("ANE graph analysis: %d MUL_MAT, %d could use ANE, %d unsupported", 
                       mul_mat_ops, supported_ops, unsupported_ops);
     
-    // If any op is unsupported, return FAILED immediately
-    // The scheduler should route the entire graph to CPU/Metal
+    // STRATEGY: Only accept graphs where we can run ALL ops on ANE
+    // If any op is unsupported, let the scheduler route the entire graph to CPU/Metal
+    // This ensures correct execution even if scheduler doesn't handle FAILED properly
+    
     if (unsupported_ops > 0) {
-        GGML_ANE_LOG_DEBUG("ANE: refusing graph due to %d unsupported ops", unsupported_ops);
+        GGML_ANE_LOG_INFO("ANE: skipping graph #%d (%d unsupported ops)", g_graph_count, unsupported_ops);
         return GGML_STATUS_FAILED;
     }
+    
+    // Additional check: Only accept graphs with at least one MUL_MAT
+    // (Pure CPU-op graphs should go to CPU backend)
+    if (mul_mat_ops == 0) {
+        GGML_ANE_LOG_DEBUG("ANE: skipping graph #%d (no MUL_MAT ops)", g_graph_count);
+        return GGML_STATUS_FAILED;
+    }
+    
+    GGML_ANE_LOG_INFO("ANE: accepting graph #%d (%d MUL_MAT, %d ops)", g_graph_count, mul_mat_ops, supported_ops);
     
     // Process each node - all ops are supported, safe to execute
     for (int i = 0; i < cgraph->n_nodes; i++) {
@@ -882,7 +893,14 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
                     struct ggml_tensor * dst_t = node;
                     
                     if (!src || !dst_t || !src->data || !dst_t->data) {
+                        GGML_ANE_LOG_WARN("UNARY: null tensor or data");
                         break;
+                    }
+                    
+                    // Check input for NaN
+                    float first_val = *(float *)src->data;
+                    if (first_val != first_val) {
+                        GGML_ANE_LOG_WARN("UNARY: input is NaN! src op=%s", ggml_op_name(src->op));
                     }
                     
                     const int64_t ne0 = src->ne[0];

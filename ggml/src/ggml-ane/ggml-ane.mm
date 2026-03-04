@@ -908,6 +908,27 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
                                  (long)src->ne[0], (long)src->ne[1], (long)src->ne[2], (long)src->ne[3],
                                  src->data);
                 GGML_ANE_LOG_WARN("    dest node: op=%s", ggml_op_name(node->op));
+                
+                // SANITIZE: Replace NaN/Inf with 0 to prevent cascade
+                // This is a workaround for buffer reuse bugs in the scheduler
+                GGML_ANE_LOG_WARN("    SANITIZING: Replacing NaN/Inf with 0.0 in src tensor");
+                int64_t total_elements = ggml_nelements(src);
+                int sanitize_count = 0;
+                for (int64_t idx = 0; idx < total_elements; idx++) {
+                    // Calculate proper offset using strides
+                    int64_t i0 = idx % src->ne[0];
+                    int64_t i1 = (idx / src->ne[0]) % src->ne[1];
+                    int64_t i2 = (idx / (src->ne[0] * src->ne[1])) % src->ne[2];
+                    int64_t i3 = idx / (src->ne[0] * src->ne[1] * src->ne[2]);
+                    
+                    char * ptr = (char *)src->data + i0 * src->nb[0] + i1 * src->nb[1] + i2 * src->nb[2] + i3 * src->nb[3];
+                    float * val = (float *)ptr;
+                    if (*val != *val || *val == INFINITY || *val == -INFINITY) {
+                        *val = 0.0f;
+                        sanitize_count++;
+                    }
+                }
+                GGML_ANE_LOG_WARN("    SANITIZED: Replaced %d bad values", sanitize_count);
             }
         }
     }

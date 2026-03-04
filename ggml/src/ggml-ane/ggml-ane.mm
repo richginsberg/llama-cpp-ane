@@ -699,7 +699,7 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
     for (int i = 0; i < cgraph->n_nodes; i++) {
         struct ggml_tensor * node = cgraph->nodes[i];
         if (node->op == GGML_OP_UNARY) {
-            GGML_ANE_LOG_INFO("GRAPH #%d contains UNARY at node[%d], unary_op=%d", 
+            GGML_ANE_LOG_INFO(">>> GRAPH #%d contains UNARY at node[%d], type=%d", 
                              g_graph_count, i, node->op_params[0]);
         }
     }
@@ -785,7 +785,11 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
     // Only refuse graphs with truly unsupported ops
     // The scheduler will then route them to CPU/Metal
     if (unsupported_ops > 0) {
-        GGML_ANE_LOG_INFO("ANE: skipping graph #%d (%d unsupported ops)", g_graph_count, unsupported_ops);
+        GGML_ANE_LOG_INFO("ANE: REJECTING graph #%d (%d unsupported ops)", g_graph_count, unsupported_ops);
+        // Show first few nodes
+        for (int i = 0; i < cgraph->n_nodes && i < 5; i++) {
+            GGML_ANE_LOG_INFO("  node[%d]: %s", i, ggml_op_name(cgraph->nodes[i]->op));
+        }
         return GGML_STATUS_FAILED;
     }
     

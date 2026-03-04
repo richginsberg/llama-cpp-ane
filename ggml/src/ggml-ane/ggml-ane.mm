@@ -429,11 +429,11 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     if (src1->type == GGML_TYPE_F16) {
         const ggml_fp16_t * src1_f16 = (const ggml_fp16_t *)src1->data;
         GGML_ANE_LOG_DEBUG("src1 is FP16, converting and transposing");
-        
+
         // Transpose from ggml [K, M] to ANE [K, M_padded]
+        // ggml uses column-major: element (k, m) at k*nb[0] + m*nb[1]
         for (int64_t k = 0; k < K; k++) {
             for (int64_t m = 0; m < M; m++) {
-                // src1[K, M]: element (k, m) at k*nb[0] + m*nb[1]
                 const ggml_fp16_t * in_ptr = (const ggml_fp16_t *)((const char *)src1_f16 + k * src1->nb[0] + m * src1->nb[1]);
                 // ANE: element (k, m) at k*M_padded + m
                 input_x[k * M_padded + m] = ggml_fp16_to_fp32(*in_ptr);
@@ -442,11 +442,11 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     } else {
         const float * src1_f32 = (const float *)src1->data;
         GGML_ANE_LOG_DEBUG("src1 is FP32, transposing");
-        
+
         // Transpose from ggml [K, M] to ANE [K, M_padded]
+        // ggml uses column-major: element (k, m) at k*nb[0] + m*nb[1]
         for (int64_t k = 0; k < K; k++) {
             for (int64_t m = 0; m < M; m++) {
-                // src1[K, M]: element (k, m) at k*nb[0] + m*nb[1]
                 size_t byte_offset = k * src1->nb[0] + m * src1->nb[1];
                 const float * in_ptr = (const float *)((const char *)src1_f32 + byte_offset);
                 // ANE: element (k, m) at k*M_padded + m
@@ -459,6 +459,20 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     GGML_ANE_LOG_DEBUG("First 5 input values: %.6f %.6f %.6f %.6f %.6f",
                        input_x[0], input_x[1], input_x[2],
                        input_x[3], input_x[4]);
+    
+    // Check for NaN values in input - if corrupted, skip ANE
+    bool has_nan = false;
+    for (int64_t i = 0; i < K * M_padded; i++) {
+        if (input_x[i] != input_x[i]) {  // NaN check
+            has_nan = true;
+            break;
+        }
+    }
+    if (has_nan) {
+        GGML_ANE_LOG_WARN("Input contains NaN values, skipping ANE execution");
+        free(input_x);
+        return false;
+    }
     
     // Allocate output (padded size)
     float * output = (float *)malloc(N * M_padded * sizeof(float));
@@ -476,12 +490,12 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
         return false;
     }
     
-    // Copy output to dst with transpose (only valid M elements, skip padding)
+    // Copy output to dst (only valid M elements, skip padding)
     // ANE output is [1, N, 1, M_padded] NCHW: element (n, m) at n*M_padded + m
-    // ggml dst has ne[0]=N, ne[1]=M: element (n, m) at n*nb[0] + m*nb[1]
-    // These are TRANSPOSED! Need to swap indices.
+    // ggml dst has ne[0]=N, ne[1]=M
+    // ggml uses column-major: element (n, m) at n*nb[0] + m*nb[1]
     float * dst_data = (float *)dst->data;
-    
+
     for (int64_t n = 0; n < N; n++) {
         for (int64_t m = 0; m < M; m++) {
             // ANE: output[n*M_padded + m]

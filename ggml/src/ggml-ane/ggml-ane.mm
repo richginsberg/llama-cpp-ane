@@ -197,6 +197,10 @@ static void ggml_ane_exec_mul(struct ggml_tensor * dst) {
     float src0_first = *(const float *)src0->data;
     float src1_first = *(const float *)src1->data;
     GGML_ANE_LOG_DEBUG("MUL: src0[0]=%.6f, src1[0]=%.6f, ne00=%ld", src0_first, src1_first, ne00);
+    GGML_ANE_LOG_DEBUG("MUL: src0 dims=[%ld,%ld,%ld,%ld], src1 dims=[%ld,%ld,%ld,%ld]",
+                       ne00, ne01, ne02, ne03, ne10, ne11, ne12, ne13);
+    GGML_ANE_LOG_DEBUG("MUL: src0 strides=[%ld,%ld,%ld,%ld], src1 strides=[%ld,%ld,%ld,%ld]",
+                       nb00, nb01, nb02, nb03, nb10, nb11, nb12, nb13);
     
     for (int64_t i03 = 0; i03 < ne03; i03++) {
         const int64_t i13 = i03 % ne13;
@@ -214,6 +218,25 @@ static void ggml_ane_exec_mul(struct ggml_tensor * dst) {
                     const float * src1_ptr = (const float *)(src1_base + i10*nb10);
                     float * dst_ptr = (float *)(dst_row + i00*nb0);
                     const float * src0_ptr = (const float *)(src0_row + i00*nb00);
+                    
+                    // Debug: check position 33 specifically
+                    if (i00 == 33 && i01 == 0 && i02 == 0 && i03 == 0) {
+                        GGML_ANE_LOG_WARN("MUL at pos 33: src0=%.6f, src1=%.6f, src1_base_offset=%ld, i10=%ld, nb10=%ld",
+                                         *src0_ptr, *src1_ptr, 
+                                         (long)(src1_base - (const char *)src1->data),
+                                         (long)i10, (long)nb10);
+                        // Check if src1_ptr is reading garbage
+                        if (*src1_ptr != *src1_ptr) {  // NaN check
+                            GGML_ANE_LOG_WARN("  src1 is NaN! Checking src1 data...");
+                            // Scan src1 for valid values
+                            for (int check = 0; check < 10 && check < ne10*ne11*ne12*ne13; check++) {
+                                float val = *((const float *)src1->data + check);
+                                fprintf(stderr, " src1[%d]=%.6f", check, val);
+                            }
+                            fprintf(stderr, "\n");
+                        }
+                    }
+                    
                     *dst_ptr = *src0_ptr * *src1_ptr;
                 }
             }

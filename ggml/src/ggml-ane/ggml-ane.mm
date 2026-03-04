@@ -735,6 +735,10 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
     for (int i = 0; i < cgraph->n_nodes; i++) {
         struct ggml_tensor * node = cgraph->nodes[i];
         
+        // Debug: show every node we consider
+        GGML_ANE_LOG_DEBUG("  Node %d: op=%s, supports=%d", 
+                          i, ggml_op_name(node->op), ggml_backend_ane_supports_op(backend, node));
+        
         // Skip nodes we don't support - they'll be handled by CPU/Metal
         if (!ggml_backend_ane_supports_op(backend, node)) {
             GGML_ANE_LOG_DEBUG("  Skipping unsupported op %d: %s", i, ggml_op_name(node->op));

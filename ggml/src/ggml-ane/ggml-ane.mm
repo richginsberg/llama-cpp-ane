@@ -41,6 +41,7 @@ extern "C" bool ggml_ane_device_init(void);
 
 static std::map<uint64_t, ggml_ane_kernel_t> g_matmul_kernels;
 static std::mutex g_matmul_kernels_mutex;
+static int g_graph_count = 0;  // Global graph counter
 
 // Simple hash for matmul dimensions
 static uint64_t hash_matmul_dims(int64_t m, int64_t n, int64_t k) {
@@ -639,7 +640,8 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
         return GGML_STATUS_FAILED;
     }
     
-    GGML_ANE_LOG_INFO("=== ANE GRAPH START: %d nodes ===", cgraph->n_nodes);
+    g_graph_count++;
+    GGML_ANE_LOG_INFO("=== ANE GRAPH #%d START: %d nodes ===", g_graph_count, cgraph->n_nodes);
     
     // Debug: show inputs to this graph
     GGML_ANE_LOG_DEBUG("Graph inputs (leaf nodes):");

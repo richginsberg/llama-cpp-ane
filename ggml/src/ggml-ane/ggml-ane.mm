@@ -748,17 +748,18 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
             GGML_ANE_LOG_DEBUG("  MUL_MAT %d: dimensions %ldx%ldx%ld, could use ANE", i, ne0, ne1, M);
             supported_ops++;
         } else if (node->op == GGML_OP_ADD || node->op == GGML_OP_MUL || 
-                   node->op == GGML_OP_RMS_NORM || node->op == GGML_OP_SOFT_MAX) {
+                   node->op == GGML_OP_RMS_NORM || node->op == GGML_OP_SOFT_MAX ||
+                   node->op == GGML_OP_UNARY) {
             // These ops are implemented (CPU execution within ANE backend)
             const char * op_name = ggml_op_name(node->op);
             GGML_ANE_LOG_DEBUG("  %s %d: supported (CPU execution)", op_name ? op_name : "unknown", i);
             supported_ops++;
         } else if (node->op == GGML_OP_VIEW || node->op == GGML_OP_RESHAPE ||
                    node->op == GGML_OP_PERMUTE || node->op == GGML_OP_TRANSPOSE ||
-                   node->op == GGML_OP_PAD ||
+                   node->op == GGML_OP_PAD || node->op == GGML_OP_UNARY ||
                    node->op == GGML_OP_CONT || node->op == GGML_OP_CPY ||
                    node->op == GGML_OP_NONE) {
-            // Metadata/copy ops
+            // Metadata/copy/unary ops
             supported_ops++;
         } else {
             // Unsupported op
@@ -867,6 +868,84 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
                 ggml_ane_exec_softmax(node);
                 break;
             
+            case GGML_OP_UNARY:
+                // Unary ops: SILU, GELU, EXP, etc.
+                {
+                    struct ggml_tensor * src = node->src[0];
+                    struct ggml_tensor * dst_t = node;
+                    
+                    if (!src || !dst_t || !src->data || !dst_t->data) {
+                        break;
+                    }
+                    
+                    const int64_t ne0 = src->ne[0];
+                    const int64_t ne1 = src->ne[1];
+                    const int64_t ne2 = src->ne[2];
+                    const int64_t ne3 = src->ne[3];
+                    
+                    const int64_t nb0 = src->nb[0];
+                    const int64_t nb1 = src->nb[1];
+                    const int64_t nb2 = src->nb[2];
+                    const int64_t nb3 = src->nb[3];
+                    
+                    const int64_t dst_nb0 = dst_t->nb[0];
+                    const int64_t dst_nb1 = dst_t->nb[1];
+                    const int64_t dst_nb2 = dst_t->nb[2];
+                    const int64_t dst_nb3 = dst_t->nb[3];
+                    
+                    // Get the unary op type from op_params
+                    const ggml_unary_op op_type = (ggml_unary_op) node->op_params[0];
+                    
+                    for (int64_t i3 = 0; i3 < ne3; i3++) {
+                        for (int64_t i2 = 0; i2 < ne2; i2++) {
+                            for (int64_t i1 = 0; i1 < ne1; i1++) {
+                                const char * src_row = (const char *)src->data + i3*nb3 + i2*nb2 + i1*nb1;
+                                char * dst_row = (char *)dst_t->data + i3*dst_nb3 + i2*dst_nb2 + i1*dst_nb1;
+                                
+                                for (int64_t i0 = 0; i0 < ne0; i0++) {
+                                    const float * s = (const float *)(src_row + i0*nb0);
+                                    float * d = (float *)(dst_row + i0*dst_nb0);
+                                    
+                                    switch (op_type) {
+                                        case GGML_UNARY_OP_SILU:
+                                            // SILU: x * sigmoid(x) = x / (1 + exp(-x))
+                                            {
+                                                float x = *s;
+                                                *d = x / (1.0f + expf(-x));
+                                            }
+                                            break;
+                                        case GGML_UNARY_OP_GELU:
+                                            // GELU approximation
+                                            {
+                                                float x = *s;
+                                                *d = 0.5f * x * (1.0f + tanhf(0.797885f * x * (1.0f + 0.044715f * x * x)));
+                                            }
+                                            break;
+                                        case GGML_UNARY_OP_EXP:
+                                            *d = expf(*s);
+                                            break;
+                                        case GGML_UNARY_OP_NEG:
+                                            *d = -*s;
+                                            break;
+                                        case GGML_UNARY_OP_ABS:
+                                            *d = fabsf(*s);
+                                            break;
+                                        case GGML_UNARY_OP_SQRT:
+                                            *d = sqrtf(*s);
+                                            break;
+                                        default:
+                                            // Unknown unary op - just copy
+                                            *d = *s;
+                                            break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    GGML_ANE_LOG_DEBUG("UNARY: op=%d, elements=%ld", op_type, ne0*ne1*ne2*ne3);
+                }
+                break;
+            
             case GGML_OP_VIEW:
             case GGML_OP_RESHAPE:
             case GGML_OP_PERMUTE:
@@ -943,9 +1022,15 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
                     // Use the destination's byte count (CONT makes it contiguous)
                     const size_t nbytes = ggml_nbytes(dst_t);
                     
-                    // Safety check
-                    if (nbytes == 0 || nbytes > 1024*1024*1024) {  // Max 1GB
-                        GGML_ANE_LOG_DEBUG("CONT/CPY: invalid size %zu", nbytes);
+                    // Handle zero-size case gracefully
+                    if (nbytes == 0) {
+                        // This can happen for view operations - just skip
+                        break;
+                    }
+                    
+                    // Safety check - max 1GB
+                    if (nbytes > 1024*1024*1024) {
+                        GGML_ANE_LOG_DEBUG("CONT/CPY: size too large %zu", nbytes);
                         break;
                     }
                     
@@ -1024,6 +1109,8 @@ static bool ggml_backend_ane_supports_op(ggml_backend_t backend, const struct gg
             return true;  // Metadata ops - no data movement
         case GGML_OP_PAD:
             return true;  // Must implement - pads tensor with zeros
+        case GGML_OP_UNARY:
+            return true;  // Unary ops (SILU, GELU, etc.) - implement basic versions
         case GGML_OP_CONT:
         case GGML_OP_CPY:
             return true;  // We must support these to avoid NaN

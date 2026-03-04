@@ -21,10 +21,10 @@
 #endif
 
 // Test matrix dimensions
-// Using sizes that are large enough to benefit from ANE
-constexpr int DIM_M = 64;      // Batch size / sequence length (spatial dim)
-constexpr int DIM_K = 256;     // Input dimension (in_ch)
-constexpr int DIM_N = 128;     // Output dimension (out_ch)
+// Using sizes that match production (Qwen model)
+constexpr int DIM_M = 2;       // Batch size / sequence length (spatial dim)
+constexpr int DIM_K = 1024;    // Input dimension (in_ch)
+constexpr int DIM_N = 6144;    // Output dimension (out_ch)
 
 static void init_matrix(float * mat, int rows, int cols, float scale = 1.0f) {
     for (int i = 0; i < rows * cols; i++) {

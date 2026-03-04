@@ -439,6 +439,10 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
         GGML_ANE_LOG_DEBUG("src1 is FP32, transposing");
         
         // Transpose from ggml [K, M] to ANE [K, M_padded]
+        // IMPORTANT: src1 might be a view into a smaller buffer!
+        // Check if nb[1] * M exceeds the actual allocation
+        size_t required_size = M * src1->nb[1];
+        
         for (int64_t k = 0; k < K; k++) {
             for (int64_t m = 0; m < M; m++) {
                 // src1[K, M]: element (k, m) at k*nb[0] + m*nb[1]
@@ -453,16 +457,18 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
         printf("[ANE DEBUG] src1->data=%p, checking stride calculations:\n", (void *)src1_f32);
         printf("[ANE DEBUG] src1 dimensions: ne[0]=%ld, ne[1]=%ld, nb[0]=%ld, nb[1]=%ld\n",
                src1->ne[0], src1->ne[1], src1->nb[0], src1->nb[1]);
-        printf("[ANE DEBUG] Total src1 size: %ld bytes (%ld elements)\n", 
-               src1->ne[0] * src1->ne[1] * sizeof(float), src1->ne[0] * src1->ne[1]);
+        printf("[ANE DEBUG] Total required: %zu bytes (%ld elements)\n", 
+               required_size, src1->ne[0] * src1->ne[1]);
         printf("[ANE DEBUG] Checking first few (k,m) reads:\n");
         for (int64_t m = 0; m < 3 && m < M; m++) {
             for (int64_t k = 0; k < 3 && k < K; k++) {
                 size_t byte_offset = k * src1->nb[0] + m * src1->nb[1];
                 size_t elem_offset = byte_offset / sizeof(float);
                 const float * in_ptr = (const float *)((const char *)src1_f32 + byte_offset);
-                printf("  (k=%ld,m=%ld): byte_offset=%zu, elem_offset=%zu, value=%.6f\n",
-                       k, m, byte_offset, elem_offset, *in_ptr);
+                float val = *in_ptr;
+                printf("  (k=%ld,m=%ld): byte_offset=%zu, elem_offset=%zu, value=%.6f%s\n",
+                       k, m, byte_offset, elem_offset, val, 
+                       (val != val) ? " [NaN!]" : "");  // NaN check
             }
         }
         printf("[ANE DEBUG] input_x first few elements:\n");

@@ -297,7 +297,12 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     const int64_t N = ne01;  // Output channels
     const int64_t M = ne11;  // Spatial (batch)
     
-    GGML_ANE_LOG_DEBUG("Conv dims: in_ch=%ld, out_ch=%ld, spatial=%ld", K, N, M);
+    // ANE appears to require minimum spatial dimension
+    // Pad to at least 4 to avoid "Program Inference error"
+    const int64_t M_padded = (M < 4) ? 4 : M;
+    
+    GGML_ANE_LOG_DEBUG("Conv dims: in_ch=%ld, out_ch=%ld, spatial=%ld (padded=%ld)", 
+                       K, N, M, M_padded);
     
     // Skip if too small (not worth ANE overhead)
     if (K * N * M < 64 * 1024) {
@@ -305,14 +310,15 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     }
     
     // Skip if too large for ANE SRAM (~32MB working set)
-    size_t working_set = K * N * 2 + K * M * 2 + N * M * 2;
+    size_t working_set = K * N * 2 + K * M_padded * 2 + N * M_padded * 2;
     if (working_set > 64 * 1024 * 1024) {  // 64MB limit (allow some spill)
         GGML_ANE_LOG_DEBUG("MUL_MAT too large for ANE: %zu MB working set", working_set / (1024 * 1024));
         return false;
     }
     
     // Check if we have a cached kernel for these dimensions
-    uint64_t hash = hash_matmul_dims(K, N, M);
+    // Use padded dimensions for hash to ensure cache hit for same padded size
+    uint64_t hash = hash_matmul_dims(K, N, M_padded);
     
     ggml_ane_kernel_t kernel = nullptr;
     {
@@ -361,11 +367,11 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
                            weights_transposed[3], weights_transposed[4]);
         
         // Generate MIL for conv-based matmul
-        // Input: [1, K, 1, M], Weights: [N, K, 1, 1], Output: [1, N, 1, M]
-        NSString * mil = ggml_ane_gen_mil_conv(K, N, M);
+        // Input: [1, K, 1, M_padded], Weights: [N, K, 1, 1], Output: [1, N, 1, M_padded]
+        NSString * mil = ggml_ane_gen_mil_conv(K, N, M_padded);
         const char * mil_cstr = [mil UTF8String];
         
-        GGML_ANE_LOG_DEBUG("MIL generated for K=%ld, N=%ld, M=%ld (using conv format)", K, N, M);
+        GGML_ANE_LOG_DEBUG("MIL generated for K=%ld, N=%ld, M=%ld (using conv format)", K, N, M_padded);
         GGML_ANE_LOG_DEBUG("MIL text:\n%s", mil_cstr);
         
         NSData * weight_blob = ggml_ane_build_weight_blob(weights_transposed, N, K);
@@ -374,8 +380,8 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
         GGML_ANE_LOG_DEBUG("Weight blob size: %zu bytes", [weight_blob length]);
         
         // Compile
-        size_t input_size = K * M * sizeof(float);
-        size_t output_size = N * M * sizeof(float);
+        size_t input_size = K * M_padded * sizeof(float);
+        size_t output_size = N * M_padded * sizeof(float);
         
         GGML_ANE_LOG_DEBUG("Buffer sizes: input=%zu, output=%zu", input_size, output_size);
         
@@ -400,42 +406,44 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
         }
     }
     
-    // Prepare input data
+    // Prepare input data with padding
     // src1 has ne[0]=K, ne[1]=M, nb[0]=4, nb[1]=K*4 (contiguous)
     // Memory layout: element (k, m) at m*K + k (row-major with M rows, K cols)
-    // ANE expects [1, K, 1, M] NCHW: element (k, m) at k*M + m
+    // ANE expects [1, K, 1, M_padded] NCHW: element (k, m) at k*M_padded + m
     // These are TRANSPOSED! Need to swap indices.
+    // Zero-pad for m >= M
     
     GGML_ANE_LOG_DEBUG("src1 type: %d (F16=%d, F32=%d)", src1->type, GGML_TYPE_F16, GGML_TYPE_F32);
     GGML_ANE_LOG_DEBUG("src1: ne[0]=%ld, ne[1]=%ld, nb[0]=%ld, nb[1]=%ld",
                        src1->ne[0], src1->ne[1], src1->nb[0], src1->nb[1]);
     
-    float * input_x = (float *)malloc(K * M * sizeof(float));
+    float * input_x = (float *)calloc(K * M_padded, sizeof(float));  // Zero-initialized for padding
     
     if (src1->type == GGML_TYPE_F16) {
         const ggml_fp16_t * src1_f16 = (const ggml_fp16_t *)src1->data;
         GGML_ANE_LOG_DEBUG("src1 is FP16, converting and transposing");
         
-        // Transpose from ggml [M rows, K cols] to ANE [K, M]
+        // Transpose from ggml [M rows, K cols] to ANE [K, M_padded]
+        // Only copy valid M elements, rest are zero-padded
         for (int64_t k = 0; k < K; k++) {
             for (int64_t m = 0; m < M; m++) {
                 // ggml: element (k, m) at k*nb[0] + m*nb[1] = k + m*K (for contiguous)
                 const ggml_fp16_t * in_ptr = (const ggml_fp16_t *)((const char *)src1_f16 + m * src1->nb[1] + k * src1->nb[0]);
-                // ANE: element (k, m) at k*M + m
-                input_x[k * M + m] = ggml_fp16_to_fp32(*in_ptr);
+                // ANE: element (k, m) at k*M_padded + m
+                input_x[k * M_padded + m] = ggml_fp16_to_fp32(*in_ptr);
             }
         }
     } else {
         const float * src1_f32 = (const float *)src1->data;
         GGML_ANE_LOG_DEBUG("src1 is FP32, transposing");
         
-        // Transpose from ggml [M rows, K cols] to ANE [K, M]
+        // Transpose from ggml [M rows, K cols] to ANE [K, M_padded]
         for (int64_t k = 0; k < K; k++) {
             for (int64_t m = 0; m < M; m++) {
                 // ggml: element (k, m) at k*nb[0] + m*nb[1]
                 const float * in_ptr = (const float *)((const char *)src1_f32 + m * src1->nb[1] + k * src1->nb[0]);
-                // ANE: element (k, m) at k*M + m
-                input_x[k * M + m] = *in_ptr;
+                // ANE: element (k, m) at k*M_padded + m
+                input_x[k * M_padded + m] = *in_ptr;
             }
         }
     }
@@ -445,8 +453,8 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
                        input_x[0], input_x[1], input_x[2],
                        input_x[3], input_x[4]);
     
-    // Allocate output
-    float * output = (float *)malloc(N * M * sizeof(float));
+    // Allocate output (padded size)
+    float * output = (float *)malloc(N * M_padded * sizeof(float));
     
     // Execute with 1 input (weights are embedded in kernel)
     const void * inputs[1] = { input_x };
@@ -461,18 +469,18 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
         return false;
     }
     
-    // Copy output to dst with transpose
-    // ANE output is [1, N, 1, M] NCHW: element (n, m) at n*M + m
+    // Copy output to dst with transpose (only valid M elements, skip padding)
+    // ANE output is [1, N, 1, M_padded] NCHW: element (n, m) at n*M_padded + m
     // ggml dst has ne[0]=N, ne[1]=M: element (n, m) at m*N + n (for contiguous)
     // These are TRANSPOSED! Need to swap indices.
     float * dst_data = (float *)dst->data;
     
     for (int64_t n = 0; n < N; n++) {
         for (int64_t m = 0; m < M; m++) {
-            // ANE: output[n*M + m]
+            // ANE: output[n*M_padded + m]
             // ggml: element at m*nb[1] + n*nb[0]
             float * dst_ptr = (float *)((char *)dst_data + m * dst->nb[1] + n * dst->nb[0]);
-            *dst_ptr = output[n * M + m];
+            *dst_ptr = output[n * M_padded + m];
         }
     }
     

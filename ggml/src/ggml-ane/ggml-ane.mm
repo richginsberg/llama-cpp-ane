@@ -828,12 +828,8 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
                         } else {
                             GGML_ANE_LOG_WARN("MUL: src0 is a leaf tensor (input/model weight)");
                         }
-                        // Note: NaN will propagate through computation
-                    // This is expected ML behavior - the model will produce garbage
-                    // but at least we won't break the scheduler
-                    GGML_ANE_LOG_WARN("MUL: src0 is NaN, computing anyway");
-                }
-                ggml_ane_exec_mul(node);
+                        // Note: NaN will propagate through computation - expected ML behavior
+                    }
                 }
                 ggml_ane_exec_mul(node);
                 {

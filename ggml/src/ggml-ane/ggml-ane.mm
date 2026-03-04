@@ -309,10 +309,40 @@ static void ggml_ane_exec_rms_norm(struct ggml_tensor * dst) {
                 // Normalize
                 for (int64_t j = 0; j < ne00; j++) {
                     float val = *(const float *)(xi + j*nb00);
-                    *(float *)(yi + j*nb0) = val * inv_rms;
+                    float result = val * inv_rms;
+                    *(float *)(yi + j*nb0) = result;
+                    
+                    // Debug: check for NaN
+                    if (j == 33 && i01 == 0 && i02 == 0 && i03 == 0) {
+                        GGML_ANE_LOG_WARN("RMS_NORM at pos 33: val=%.6f, rms=%.6f, inv_rms=%.6f, result=%.6f",
+                                         val, rms, inv_rms, result);
+                    }
                 }
             }
         }
+    }
+    
+    // Debug: scan for NaN in output
+    int64_t nan_count = 0;
+    int64_t first_nan_pos = -1;
+    for (int64_t i03 = 0; i03 < ne03 && nan_count < 10; i03++) {
+        for (int64_t i02 = 0; i02 < ne02 && nan_count < 10; i02++) {
+            for (int64_t i01 = 0; i01 < ne01 && nan_count < 10; i01++) {
+                char * row = (char *)dst->data + i03*nb3 + i02*nb2 + i01*nb1;
+                for (int64_t j = 0; j < ne00 && nan_count < 10; j++) {
+                    float val = *(float *)(row + j*nb0);
+                    if (val != val) {  // NaN
+                        if (first_nan_pos < 0) first_nan_pos = j + i01*ne00 + i02*ne00*ne01 + i03*ne00*ne01*ne02;
+                        nan_count++;
+                    }
+                }
+            }
+        }
+    }
+    if (nan_count > 0) {
+        GGML_ANE_LOG_WARN("RMS_NORM produced %lld NaN! First at pos %lld (dims: %lldx%lldx%lldx%lld)",
+                         (long long)nan_count, (long long)first_nan_pos,
+                         (long long)ne00, (long long)ne01, (long long)ne02, (long long)ne03);
     }
 }
 

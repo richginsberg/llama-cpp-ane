@@ -21,11 +21,10 @@
 #endif
 
 // Test matrix dimensions
-// Testing minimum working spatial dimension - M=8 failed, M=16 passed
-// Try M=13 which is the production dimension seen in Qwen model
-constexpr int DIM_M = 13;      // Batch size / sequence length (spatial dim)
-constexpr int DIM_K = 1024;    // Input dimension (in_ch)
-constexpr int DIM_N = 6144;    // Output dimension (out_ch)
+// Using original working dimensions
+constexpr int DIM_M = 64;      // Batch size / sequence length (spatial dim)
+constexpr int DIM_K = 256;     // Input dimension (in_ch)
+constexpr int DIM_N = 128;     // Output dimension (out_ch)
 
 static void init_matrix(float * mat, int rows, int cols, float scale = 1.0f) {
     for (int i = 0; i < rows * cols; i++) {

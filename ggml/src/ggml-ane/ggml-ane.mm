@@ -297,9 +297,9 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     const int64_t N = ne01;  // Output channels
     const int64_t M = ne11;  // Spatial (batch)
     
-    // ANE appears to require minimum spatial dimension
-    // Pad to at least 4 to avoid "Program Inference error"
-    const int64_t M_padded = (M < 4) ? 4 : M;
+    // ANE requires minimum spatial dimension of 16
+    // Pad to at least 16 to avoid "Program Inference error"
+    const int64_t M_padded = (M < 16) ? 16 : M;
     
     GGML_ANE_LOG_DEBUG("Conv dims: in_ch=%ld, out_ch=%ld, spatial=%ld (padded=%ld)", 
                        K, N, M, M_padded);

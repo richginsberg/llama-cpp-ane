@@ -370,6 +370,11 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
             }
         }
         
+        // Debug: print first few weights
+        GGML_ANE_LOG_DEBUG("First 5 transposed weights: %.6f %.6f %.6f %.6f %.6f",
+                           weights_transposed[0], weights_transposed[1], weights_transposed[2],
+                           weights_transposed[3], weights_transposed[4]);
+        
         NSData * weight_blob = ggml_ane_build_weight_blob(weights_transposed, N, K);
         free(weights_transposed);
         
@@ -439,6 +444,11 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
             }
         }
     }
+    
+    // Debug: print first few input values
+    GGML_ANE_LOG_DEBUG("First 5 input values: %.6f %.6f %.6f %.6f %.6f",
+                       input_conv[0], input_conv[1], input_conv[2],
+                       input_conv[3], input_conv[4]);
     
     // Allocate output
     float * output_conv = (float *)malloc(N * M * sizeof(float));

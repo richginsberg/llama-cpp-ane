@@ -469,9 +469,56 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
         }
     }
     if (has_nan) {
-        GGML_ANE_LOG_WARN("Input contains NaN values, skipping ANE execution");
+        GGML_ANE_LOG_WARN("Input contains NaN values, falling back to CPU");
         free(input_x);
-        return false;
+        
+        // CPU fallback for MUL_MAT
+        // dst = src0^T @ src1 where src0[K,N], src1[K,M], dst[N,M]
+        float * dst_data = (float *)dst->data;
+        
+        // Transpose weights if needed
+        float * weights_fp32 = (float *)malloc(N * K * sizeof(float));
+        if (src0->type == GGML_TYPE_F16) {
+            const ggml_fp16_t * w16 = (const ggml_fp16_t *)src0->data;
+            for (int64_t n = 0; n < N; n++) {
+                for (int64_t k = 0; k < K; k++) {
+                    weights_fp32[n * K + k] = ggml_fp16_to_fp32(*(const ggml_fp16_t *)((const char *)w16 + k * src0->nb[0] + n * src0->nb[1]));
+                }
+            }
+        } else {
+            const float * w32 = (const float *)src0->data;
+            for (int64_t n = 0; n < N; n++) {
+                for (int64_t k = 0; k < K; k++) {
+                    weights_fp32[n * K + k] = *(const float *)((const char *)w32 + k * src0->nb[0] + n * src0->nb[1]);
+                }
+            }
+        }
+        
+        // Compute matmul: dst[n,m] = sum_k(weights[n,k] * input[k,m])
+        #pragma omp parallel for collapse(2)
+        for (int64_t n = 0; n < N; n++) {
+            for (int64_t m = 0; m < M; m++) {
+                float sum = 0.0f;
+                for (int64_t k = 0; k < K; k++) {
+                    float w = weights_fp32[n * K + k];
+                    // Read input from src1
+                    float x;
+                    if (src1->type == GGML_TYPE_F16) {
+                        const ggml_fp16_t * x16 = (const ggml_fp16_t *)((const char *)src1->data + k * src1->nb[0] + m * src1->nb[1]);
+                        x = ggml_fp16_to_fp32(*x16);
+                    } else {
+                        x = *(const float *)((const char *)src1->data + k * src1->nb[0] + m * src1->nb[1]);
+                    }
+                    sum += w * x;
+                }
+                float * dst_ptr = (float *)((char *)dst_data + n * dst->nb[0] + m * dst->nb[1]);
+                *dst_ptr = sum;
+            }
+        }
+        
+        free(weights_fp32);
+        GGML_ANE_LOG_DEBUG("CPU fallback MUL_MAT completed");
+        return true;
     }
     
     // Allocate output (padded size)

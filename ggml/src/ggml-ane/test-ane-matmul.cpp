@@ -21,8 +21,8 @@
 #endif
 
 // Test matrix dimensions
-// Using sizes that match production (Qwen model)
-constexpr int DIM_M = 2;       // Batch size / sequence length (spatial dim)
+// Testing if M=2 is the issue vs M=64
+constexpr int DIM_M = 4;       // Batch size / sequence length (spatial dim)
 constexpr int DIM_K = 1024;    // Input dimension (in_ch)
 constexpr int DIM_N = 6144;    // Output dimension (out_ch)
 

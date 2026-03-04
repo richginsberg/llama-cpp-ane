@@ -219,6 +219,29 @@ static void ggml_ane_exec_mul(struct ggml_tensor * dst) {
             }
         }
     }
+    
+    // Debug: scan for NaN in output
+    int64_t nan_count = 0;
+    int64_t first_nan_pos = -1;
+    for (int64_t i03 = 0; i03 < ne03 && nan_count < 10; i03++) {
+        for (int64_t i02 = 0; i02 < ne02 && nan_count < 10; i02++) {
+            for (int64_t i01 = 0; i01 < ne01 && nan_count < 10; i01++) {
+                for (int64_t i00 = 0; i00 < ne00 && nan_count < 10; i00++) {
+                    char * ptr = (char *)dst->data + i03*nb3 + i02*nb2 + i01*nb1 + i00*nb0;
+                    float val = *(float *)ptr;
+                    if (val != val) {  // NaN
+                        if (first_nan_pos < 0) first_nan_pos = i00 + i01*ne00 + i02*ne00*ne01 + i03*ne00*ne01*ne02;
+                        nan_count++;
+                    }
+                }
+            }
+        }
+    }
+    if (nan_count > 0) {
+        GGML_ANE_LOG_WARN("MUL produced %lld NaN values! First NaN at position %lld (dims: %lldx%lldx%lldx%lld)",
+                         (long long)nan_count, (long long)first_nan_pos,
+                         (long long)ne00, (long long)ne01, (long long)ne02, (long long)ne03);
+    }
 }
 
 static void ggml_ane_exec_rms_norm(struct ggml_tensor * dst) {
@@ -538,13 +561,24 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     
     // Check for NaN values in input - if corrupted, skip ANE
     bool has_nan = false;
+    int64_t nan_position = -1;
     for (int64_t i = 0; i < K * M_padded; i++) {
         if (input_x[i] != input_x[i]) {  // NaN check
             has_nan = true;
+            nan_position = i;
             break;
         }
     }
     if (has_nan) {
+        // Show more context around the NaN
+        int64_t start = (nan_position > 5) ? nan_position - 5 : 0;
+        int64_t end = (nan_position + 5 < K * M_padded) ? nan_position + 5 : K * M_padded;
+        GGML_ANE_LOG_WARN("Input contains NaN at position %lld! Values [%lld-%lld]:", 
+                         (long long)nan_position, (long long)start, (long long)end);
+        for (int64_t i = start; i < end; i++) {
+            fprintf(stderr, " [%lld]=%.6f", (long long)i, input_x[i]);
+        }
+        fprintf(stderr, "\n");
         GGML_ANE_LOG_WARN("Input contains NaN values, falling back to CPU");
         free(input_x);
         

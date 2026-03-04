@@ -756,10 +756,10 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
             supported_ops++;
         } else if (node->op == GGML_OP_VIEW || node->op == GGML_OP_RESHAPE ||
                    node->op == GGML_OP_PERMUTE || node->op == GGML_OP_TRANSPOSE ||
-                   node->op == GGML_OP_PAD || node->op == GGML_OP_UNARY ||
+                   node->op == GGML_OP_PAD ||
                    node->op == GGML_OP_CONT || node->op == GGML_OP_CPY ||
                    node->op == GGML_OP_NONE) {
-            // Metadata/copy/unary ops
+            // Metadata/copy ops
             supported_ops++;
         } else {
             // Unsupported op
@@ -773,8 +773,8 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
     GGML_ANE_LOG_DEBUG("ANE graph analysis: %d MUL_MAT, %d could use ANE, %d unsupported", 
                       mul_mat_ops, supported_ops, unsupported_ops);
     
-    // CRITICAL: If any op is unsupported, return FAILED immediately
-    // Do NOT execute any ops - the scheduler will route the entire graph to CPU/Metal
+    // If any op is unsupported, return FAILED immediately
+    // The scheduler should route the entire graph to CPU/Metal
     if (unsupported_ops > 0) {
         GGML_ANE_LOG_DEBUG("ANE: refusing graph due to %d unsupported ops", unsupported_ops);
         return GGML_STATUS_FAILED;

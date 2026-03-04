@@ -21,8 +21,8 @@
 #endif
 
 // Test matrix dimensions
-// Testing with M=64 which is known to work in maderix sram_bench
-constexpr int DIM_M = 64;      // Batch size / sequence length (spatial dim)
+// Testing minimum working spatial dimension
+constexpr int DIM_M = 4;       // Batch size / sequence length (spatial dim)
 constexpr int DIM_K = 1024;    // Input dimension (in_ch)
 constexpr int DIM_N = 6144;    // Output dimension (out_ch)
 

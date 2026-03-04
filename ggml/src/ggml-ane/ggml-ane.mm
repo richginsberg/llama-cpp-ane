@@ -1024,7 +1024,6 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
             case GGML_OP_CONT:
             case GGML_OP_CPY:
                 // These ops must COPY data
-                // For both CONT and CPY: src = node->src[0], dst = node (the node IS the destination)
                 {
                     const struct ggml_tensor * src = node->src[0];
                     const struct ggml_tensor * dst_t = node;
@@ -1036,22 +1035,62 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
                         break;
                     }
                     
-                    // Use the destination's byte count (CONT makes it contiguous)
-                    const size_t nbytes = ggml_nbytes(dst_t);
+                    // Get dimensions
+                    const int64_t ne0 = src->ne[0];
+                    const int64_t ne1 = src->ne[1];
+                    const int64_t ne2 = src->ne[2];
+                    const int64_t ne3 = src->ne[3];
                     
-                    // Handle zero-size case - this can happen with view operations
-                    // Just skip without warning (it's normal for some graphs)
-                    if (nbytes == 0) {
-                        break;
+                    const int64_t nb0 = src->nb[0];
+                    const int64_t nb1 = src->nb[1];
+                    const int64_t nb2 = src->nb[2];
+                    const int64_t nb3 = src->nb[3];
+                    
+                    const int64_t dst_nb0 = dst_t->nb[0];
+                    const int64_t dst_nb1 = dst_t->nb[1];
+                    const int64_t dst_nb2 = dst_t->nb[2];
+                    const int64_t dst_nb3 = dst_t->nb[3];
+                    
+                    // Check if we can use fast memcpy (both contiguous)
+                    const bool src_contiguous = (nb0 == sizeof(float)) && 
+                                                (ne1 <= 1 || nb1 == ne0 * sizeof(float)) &&
+                                                (ne2 <= 1 || nb2 == ne1 * nb1) &&
+                                                (ne3 <= 1 || nb3 == ne2 * nb2);
+                    
+                    const bool dst_contiguous = (dst_nb0 == sizeof(float)) && 
+                                                (ne1 <= 1 || dst_nb1 == ne0 * sizeof(float)) &&
+                                                (ne2 <= 1 || dst_nb2 == ne1 * dst_nb1) &&
+                                                (ne3 <= 1 || dst_nb3 == ne2 * dst_nb2);
+                    
+                    if (src_contiguous && dst_contiguous) {
+                        // Fast path: both contiguous, use memcpy
+                        const size_t nbytes = ne0 * ne1 * ne2 * ne3 * sizeof(float);
+                        if (nbytes > 0 && nbytes <= 1024*1024*1024) {
+                            memcpy(dst_t->data, src->data, nbytes);
+                        }
+                    } else {
+                        // Slow path: stride-based copy
+                        for (int64_t i3 = 0; i3 < ne3; i3++) {
+                            for (int64_t i2 = 0; i2 < ne2; i2++) {
+                                for (int64_t i1 = 0; i1 < ne1; i1++) {
+                                    const char * src_row = (const char *)src->data + i3*nb3 + i2*nb2 + i1*nb1;
+                                    char * dst_row = (char *)dst_t->data + i3*dst_nb3 + i2*dst_nb2 + i1*dst_nb1;
+                                    
+                                    // Check if we can copy entire row at once
+                                    if (nb0 == sizeof(float) && dst_nb0 == sizeof(float)) {
+                                        memcpy(dst_row, src_row, ne0 * sizeof(float));
+                                    } else {
+                                        // Element-by-element copy
+                                        for (int64_t i0 = 0; i0 < ne0; i0++) {
+                                            const float * s = (const float *)(src_row + i0*nb0);
+                                            float * d = (float *)(dst_row + i0*dst_nb0);
+                                            *d = *s;
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
-                    
-                    // Safety check - max 1GB
-                    if (nbytes > 1024*1024*1024) {
-                        break;
-                    }
-                    
-                    // For CONT, destination is guaranteed contiguous, so simple memcpy works
-                    memcpy(dst_t->data, src->data, nbytes);
                 }
                 break;
                 

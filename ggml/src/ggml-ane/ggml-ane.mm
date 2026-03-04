@@ -1105,6 +1105,22 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
                         break;
                     }
                     
+                    // Debug: Check input for NaN pattern BEFORE copying
+                    if (src->type == GGML_TYPE_F32 && ne0 >= 5) {
+                        int nan_count = 0;
+                        float vals[5];
+                        for (int check = 0; check < 5; check++) {
+                            const char * ptr = (const char *)src->data + check * nb0;
+                            vals[check] = *(const float *)ptr;
+                            if (vals[check] != vals[check]) nan_count++;  // NaN check
+                        }
+                        if (nan_count > 0) {
+                            GGML_ANE_LOG_WARN("CPY/CONT: INPUT NaN pattern [%f,%f,%f,%f,%f] src_op=%s", 
+                                             vals[0], vals[1], vals[2], vals[3], vals[4],
+                                             src->op == GGML_OP_NONE ? "NONE" : ggml_op_name(src->op));
+                        }
+                    }
+                    
                     // Handle type conversion
                     const bool same_type = (src->type == dst_t->type);
                     const size_t src_type_size = ggml_type_size(src->type);
@@ -1179,6 +1195,21 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
                         }
                     } else {
                         GGML_ANE_LOG_WARN("CPY: unsupported type combination src=%d dst=%d", src->type, dst_t->type);
+                    }
+                    
+                    // Debug: Check output for NaN pattern AFTER copying
+                    if (dst_t->type == GGML_TYPE_F32 && ne0 >= 5) {
+                        int nan_count = 0;
+                        float vals[5];
+                        for (int check = 0; check < 5; check++) {
+                            const char * ptr = (const char *)dst_t->data + check * dst_nb0;
+                            vals[check] = *(const float *)ptr;
+                            if (vals[check] != vals[check]) nan_count++;  // NaN check
+                        }
+                        if (nan_count > 0) {
+                            GGML_ANE_LOG_WARN("CPY/CONT: OUTPUT NaN pattern [%f,%f,%f,%f,%f]", 
+                                             vals[0], vals[1], vals[2], vals[3], vals[4]);
+                        }
                     }
                 }
                 break;

@@ -346,15 +346,15 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
         
         if (src0->type == GGML_TYPE_F16) {
             // FP16 weights - need to convert to FP32
-            const _Float16 * weights_f16 = (const _Float16 *)src0->data;
+            const ggml_fp16_t * weights_f16 = (const ggml_fp16_t *)src0->data;
             GGML_ANE_LOG_DEBUG("src0 is FP16, converting to FP32 during transpose");
             
             for (int64_t n = 0; n < N; n++) {
                 for (int64_t k = 0; k < K; k++) {
                     // src0 is [K, N] with stride nb[1] for K dimension
                     // Element (k, n) is at offset k * nb[1] + n * nb[0]
-                    const _Float16 * w_ptr = (const _Float16 *)((const char *)weights_f16 + k * src0->nb[1] + n * src0->nb[0]);
-                    weights_transposed[n * K + k] = (float)*w_ptr;
+                    const ggml_fp16_t * w_ptr = (const ggml_fp16_t *)((const char *)weights_f16 + k * src0->nb[1] + n * src0->nb[0]);
+                    weights_transposed[n * K + k] = ggml_fp16_to_fp32(*w_ptr);
                 }
             }
         } else {
@@ -413,13 +413,13 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     
     if (src1->type == GGML_TYPE_F16) {
         // FP16 input - need to convert to FP32
-        const _Float16 * src1_f16 = (const _Float16 *)src1->data;
+        const ggml_fp16_t * src1_f16 = (const ggml_fp16_t *)src1->data;
         GGML_ANE_LOG_DEBUG("src1 is FP16, converting to FP32");
         
         for (int64_t k = 0; k < K; k++) {
             for (int64_t m = 0; m < M; m++) {
-                const _Float16 * in_ptr = (const _Float16 *)((const char *)src1_f16 + k * src1->nb[1] + m * src1->nb[0]);
-                input_conv[k * M + m] = (float)*in_ptr;
+                const ggml_fp16_t * in_ptr = (const ggml_fp16_t *)((const char *)src1_f16 + k * src1->nb[1] + m * src1->nb[0]);
+                input_conv[k * M + m] = ggml_fp16_to_fp32(*in_ptr);
             }
         }
     } else {

@@ -773,7 +773,14 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
     GGML_ANE_LOG_DEBUG("ANE graph analysis: %d MUL_MAT, %d could use ANE, %d unsupported", 
                       mul_mat_ops, supported_ops, unsupported_ops);
     
-    // Process each node - skip unsupported ops (scheduler will route them to other backends)
+    // CRITICAL: If any op is unsupported, return FAILED immediately
+    // Do NOT execute any ops - the scheduler will route the entire graph to CPU/Metal
+    if (unsupported_ops > 0) {
+        GGML_ANE_LOG_DEBUG("ANE: refusing graph due to %d unsupported ops", unsupported_ops);
+        return GGML_STATUS_FAILED;
+    }
+    
+    // Process each node - all ops are supported, safe to execute
     for (int i = 0; i < cgraph->n_nodes; i++) {
         struct ggml_tensor * node = cgraph->nodes[i];
         
@@ -1060,13 +1067,6 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
     
     if (supported_ops > 0) {
         GGML_ANE_LOG_DEBUG("ANE: processed %d ops", supported_ops);
-    }
-    
-    // If we have unsupported ops, return FAILED so scheduler can route them to CPU/Metal
-    // Otherwise downstream ops will have undefined inputs
-    if (unsupported_ops > 0) {
-        GGML_ANE_LOG_DEBUG("ANE: returning FAILED due to %d unsupported ops", unsupported_ops);
-        return GGML_STATUS_FAILED;
     }
     
     if (g_first_nan_graph > 0) {

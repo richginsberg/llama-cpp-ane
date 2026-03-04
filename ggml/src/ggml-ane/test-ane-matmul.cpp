@@ -21,8 +21,8 @@
 #endif
 
 // Test matrix dimensions
-// Testing minimum working spatial dimension
-constexpr int DIM_M = 4;       // Batch size / sequence length (spatial dim)
+// Testing minimum working spatial dimension - M=4 failed, try M=8
+constexpr int DIM_M = 8;       // Batch size / sequence length (spatial dim)
 constexpr int DIM_K = 1024;    // Input dimension (in_ch)
 constexpr int DIM_N = 6144;    // Output dimension (out_ch)
 

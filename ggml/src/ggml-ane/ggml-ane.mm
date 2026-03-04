@@ -140,15 +140,33 @@ static void ggml_ane_exec_add(struct ggml_tensor * dst) {
     struct ggml_tensor * src0 = dst->src[0];
     struct ggml_tensor * src1 = dst->src[1];
     
-    const int64_t ne = ggml_nelements(dst);
-    const float * a = (const float *)src0->data;
-    const float * b = (const float *)src1->data;
-    float * c = (float *)dst->data;
+    // Use proper stride-based indexing (handles non-contiguous tensors)
+    const int64_t ne00 = src0->ne[0], ne01 = src0->ne[1], ne02 = src0->ne[2], ne03 = src0->ne[3];
+    const int64_t nb00 = src0->nb[0], nb01 = src0->nb[1], nb02 = src0->nb[2], nb03 = src0->nb[3];
+    const int64_t nb10 = src1->nb[0], nb11 = src1->nb[1], nb12 = src1->nb[2], nb13 = src1->nb[3];
+    const int64_t nb0 = dst->nb[0], nb1 = dst->nb[1], nb2 = dst->nb[2], nb3 = dst->nb[3];
     
-    // Simple vectorized add
-    #pragma omp parallel for
-    for (int64_t i = 0; i < ne; i++) {
-        c[i] = a[i] + b[i];
+    // Broadcast src1 dimensions
+    const int64_t ne10 = src1->ne[0], ne11 = src1->ne[1], ne12 = src1->ne[2], ne13 = src1->ne[3];
+    
+    for (int64_t i03 = 0; i03 < ne03; i03++) {
+        const int64_t i13 = i03 % ne13;
+        for (int64_t i02 = 0; i02 < ne02; i02++) {
+            const int64_t i12 = i02 % ne12;
+            for (int64_t i01 = 0; i01 < ne01; i01++) {
+                const int64_t i11 = i01 % ne11;
+                
+                float * dst_ptr = (float *)((char *)dst->data + i03*nb3 + i02*nb2 + i01*nb1);
+                const float * src0_ptr = (const float *)((const char *)src0->data + i03*nb03 + i02*nb02 + i01*nb01);
+                const char * src1_base = (const char *)src1->data + i13*nb13 + i12*nb12 + i11*nb11;
+                
+                for (int64_t i00 = 0; i00 < ne00; i00++) {
+                    const int64_t i10 = i00 % ne10;
+                    const float * src1_ptr = (const float *)(src1_base + i10*nb10);
+                    dst_ptr[i00] = src0_ptr[i00] + *src1_ptr;
+                }
+            }
+        }
     }
 }
 
@@ -156,15 +174,33 @@ static void ggml_ane_exec_mul(struct ggml_tensor * dst) {
     struct ggml_tensor * src0 = dst->src[0];
     struct ggml_tensor * src1 = dst->src[1];
     
-    const int64_t ne = ggml_nelements(dst);
-    const float * a = (const float *)src0->data;
-    const float * b = (const float *)src1->data;
-    float * c = (float *)dst->data;
+    // Use proper stride-based indexing (handles non-contiguous tensors)
+    const int64_t ne00 = src0->ne[0], ne01 = src0->ne[1], ne02 = src0->ne[2], ne03 = src0->ne[3];
+    const int64_t nb00 = src0->nb[0], nb01 = src0->nb[1], nb02 = src0->nb[2], nb03 = src0->nb[3];
+    const int64_t nb10 = src1->nb[0], nb11 = src1->nb[1], nb12 = src1->nb[2], nb13 = src1->nb[3];
+    const int64_t nb0 = dst->nb[0], nb1 = dst->nb[1], nb2 = dst->nb[2], nb3 = dst->nb[3];
     
-    // Simple vectorized mul
-    #pragma omp parallel for
-    for (int64_t i = 0; i < ne; i++) {
-        c[i] = a[i] * b[i];
+    // Broadcast src1 dimensions
+    const int64_t ne10 = src1->ne[0], ne11 = src1->ne[1], ne12 = src1->ne[2], ne13 = src1->ne[3];
+    
+    for (int64_t i03 = 0; i03 < ne03; i03++) {
+        const int64_t i13 = i03 % ne13;
+        for (int64_t i02 = 0; i02 < ne02; i02++) {
+            const int64_t i12 = i02 % ne12;
+            for (int64_t i01 = 0; i01 < ne01; i01++) {
+                const int64_t i11 = i01 % ne11;
+                
+                float * dst_ptr = (float *)((char *)dst->data + i03*nb3 + i02*nb2 + i01*nb1);
+                const float * src0_ptr = (const float *)((const char *)src0->data + i03*nb03 + i02*nb02 + i01*nb01);
+                const char * src1_base = (const char *)src1->data + i13*nb13 + i12*nb12 + i11*nb11;
+                
+                for (int64_t i00 = 0; i00 < ne00; i00++) {
+                    const int64_t i10 = i00 % ne10;
+                    const float * src1_ptr = (const float *)(src1_base + i10*nb10);
+                    dst_ptr[i00] = src0_ptr[i00] * *src1_ptr;
+                }
+            }
+        }
     }
 }
 
@@ -176,33 +212,43 @@ static void ggml_ane_exec_rms_norm(struct ggml_tensor * dst) {
     const int64_t ne02 = src->ne[2];
     const int64_t ne03 = src->ne[3];
     
-    const float * x = (const float *)src->data;
-    float * y = (float *)dst->data;
+    const int64_t nb00 = src->nb[0];
+    const int64_t nb01 = src->nb[1];
+    const int64_t nb02 = src->nb[2];
+    const int64_t nb03 = src->nb[3];
+    
+    const int64_t nb0 = dst->nb[0];
+    const int64_t nb1 = dst->nb[1];
+    const int64_t nb2 = dst->nb[2];
+    const int64_t nb3 = dst->nb[3];
     
     // RMS norm: y = x * rsqrt(mean(x^2) + eps)
     const float eps = 1e-5f;  // Standard epsilon
     
-    // For each row, compute RMS and normalize
-    const int64_t n_rows = ne01 * ne02 * ne03;
-    
-    #pragma omp parallel for
-    for (int64_t i = 0; i < n_rows; i++) {
-        const float * xi = x + i * ne00;
-        float * yi = y + i * ne00;
-        
-        // Compute sum of squares
-        float sum_sq = 0.0f;
-        for (int64_t j = 0; j < ne00; j++) {
-            sum_sq += xi[j] * xi[j];
-        }
-        
-        // Compute RMS
-        float rms = sqrtf(sum_sq / ne00 + eps);
-        float inv_rms = 1.0f / rms;
-        
-        // Normalize
-        for (int64_t j = 0; j < ne00; j++) {
-            yi[j] = xi[j] * inv_rms;
+    #pragma omp parallel for collapse(2)
+    for (int64_t i03 = 0; i03 < ne03; i03++) {
+        for (int64_t i02 = 0; i02 < ne02; i02++) {
+            for (int64_t i01 = 0; i01 < ne01; i01++) {
+                const char * xi = (const char *)src->data + i03*nb03 + i02*nb02 + i01*nb01;
+                char * yi = (char *)dst->data + i03*nb3 + i02*nb2 + i01*nb1;
+                
+                // Compute sum of squares
+                float sum_sq = 0.0f;
+                for (int64_t j = 0; j < ne00; j++) {
+                    float val = *(const float *)(xi + j*nb00);
+                    sum_sq += val * val;
+                }
+                
+                // Compute RMS
+                float rms = sqrtf(sum_sq / ne00 + eps);
+                float inv_rms = 1.0f / rms;
+                
+                // Normalize
+                for (int64_t j = 0; j < ne00; j++) {
+                    float val = *(const float *)(xi + j*nb00);
+                    *(float *)(yi + j*nb0) = val * inv_rms;
+                }
+            }
         }
     }
 }
@@ -215,34 +261,47 @@ static void ggml_ane_exec_softmax(struct ggml_tensor * dst) {
     const int64_t ne02 = src->ne[2];
     const int64_t ne03 = src->ne[3];
     
-    const float * x = (const float *)src->data;
-    float * y = (float *)dst->data;
+    const int64_t nb00 = src->nb[0];
+    const int64_t nb01 = src->nb[1];
+    const int64_t nb02 = src->nb[2];
+    const int64_t nb03 = src->nb[3];
+    
+    const int64_t nb0 = dst->nb[0];
+    const int64_t nb1 = dst->nb[1];
+    const int64_t nb2 = dst->nb[2];
+    const int64_t nb3 = dst->nb[3];
     
     // Softmax per row
-    const int64_t n_rows = ne01 * ne02 * ne03;
-    
-    #pragma omp parallel for
-    for (int64_t i = 0; i < n_rows; i++) {
-        const float * xi = x + i * ne00;
-        float * yi = y + i * ne00;
-        
-        // Find max for numerical stability
-        float max_val = xi[0];
-        for (int64_t j = 1; j < ne00; j++) {
-            if (xi[j] > max_val) max_val = xi[j];
-        }
-        
-        // Compute exp and sum
-        float sum = 0.0f;
-        for (int64_t j = 0; j < ne00; j++) {
-            yi[j] = expf(xi[j] - max_val);
-            sum += yi[j];
-        }
-        
-        // Normalize
-        float inv_sum = 1.0f / sum;
-        for (int64_t j = 0; j < ne00; j++) {
-            yi[j] *= inv_sum;
+    #pragma omp parallel for collapse(2)
+    for (int64_t i03 = 0; i03 < ne03; i03++) {
+        for (int64_t i02 = 0; i02 < ne02; i02++) {
+            for (int64_t i01 = 0; i01 < ne01; i01++) {
+                const char * xi = (const char *)src->data + i03*nb03 + i02*nb02 + i01*nb01;
+                char * yi = (char *)dst->data + i03*nb3 + i02*nb2 + i01*nb1;
+                
+                // Find max for numerical stability
+                float max_val = *(const float *)(xi + 0*nb00);
+                for (int64_t j = 1; j < ne00; j++) {
+                    float val = *(const float *)(xi + j*nb00);
+                    if (val > max_val) max_val = val;
+                }
+                
+                // Compute exp and sum
+                float sum = 0.0f;
+                for (int64_t j = 0; j < ne00; j++) {
+                    float val = *(const float *)(xi + j*nb00);
+                    float exp_val = expf(val - max_val);
+                    *(float *)(yi + j*nb0) = exp_val;
+                    sum += exp_val;
+                }
+                
+                // Normalize
+                float inv_sum = 1.0f / sum;
+                for (int64_t j = 0; j < ne00; j++) {
+                    float * ptr = (float *)(yi + j*nb0);
+                    *ptr *= inv_sum;
+                }
+            }
         }
     }
 }

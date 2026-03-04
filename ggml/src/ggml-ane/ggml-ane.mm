@@ -739,7 +739,10 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
                 break;
             
             case GGML_OP_ADD:
+                GGML_ANE_LOG_DEBUG("ADD: src0=%p, src1=%p, src0[0]=%.6f", 
+                                   node->src[0], node->src[1], *(float *)node->src[0]->data);
                 ggml_ane_exec_add(node);
+                GGML_ANE_LOG_DEBUG("ADD result: dst[0]=%.6f", *(float *)node->data);
                 break;
             
             case GGML_OP_MUL:
@@ -751,7 +754,10 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
                 break;
             
             case GGML_OP_RMS_NORM:
+                GGML_ANE_LOG_DEBUG("RMS_NORM: src=%p, src[0]=%.6f, ne00=%ld", 
+                                   node->src[0], *(float *)node->src[0]->data, node->src[0]->ne[0]);
                 ggml_ane_exec_rms_norm(node);
+                GGML_ANE_LOG_DEBUG("RMS_NORM result: dst[0]=%.6f", *(float *)node->data);
                 break;
             
             case GGML_OP_SOFT_MAX:

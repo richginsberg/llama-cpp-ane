@@ -42,6 +42,7 @@ extern "C" bool ggml_ane_device_init(void);
 static std::map<uint64_t, ggml_ane_kernel_t> g_matmul_kernels;
 static std::mutex g_matmul_kernels_mutex;
 static int g_graph_count = 0;  // Global graph counter
+static int g_first_nan_graph = -1;  // First graph where NaN was detected
 
 // Simple hash for matmul dimensions
 static uint64_t hash_matmul_dims(int64_t m, int64_t n, int64_t k) {
@@ -660,10 +661,22 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
         struct ggml_tensor * first = cgraph->nodes[0];
         GGML_ANE_LOG_DEBUG("First node: op=%s", ggml_op_name(first->op));
         if (first->src[0] && first->src[0]->data) {
-            GGML_ANE_LOG_DEBUG("  src0[0]=%.6f", *(float *)first->src[0]->data);
+            float v0 = *(float *)first->src[0]->data;
+            GGML_ANE_LOG_DEBUG("  src0[0]=%.6f", v0);
+            // Check for NaN
+            if (v0 != v0 && g_first_nan_graph < 0) {
+                g_first_nan_graph = g_graph_count;
+                GGML_ANE_LOG_WARN("*** FIRST NaN DETECTED at GRAPH #%d, src0 of first node ***", g_graph_count);
+            }
         }
         if (first->src[1] && first->src[1]->data) {
-            GGML_ANE_LOG_DEBUG("  src1[0]=%.6f", *(float *)first->src[1]->data);
+            float v1 = *(float *)first->src[1]->data;
+            GGML_ANE_LOG_DEBUG("  src1[0]=%.6f", v1);
+            // Check for NaN
+            if (v1 != v1 && g_first_nan_graph < 0) {
+                g_first_nan_graph = g_graph_count;
+                GGML_ANE_LOG_WARN("*** FIRST NaN DETECTED at GRAPH #%d, src1 of first node ***", g_graph_count);
+            }
         }
     }
     
@@ -775,22 +788,42 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
                 GGML_ANE_LOG_DEBUG("ADD: src0=%p, src1=%p, src0[0]=%.6f", 
                                    node->src[0], node->src[1], *(float *)node->src[0]->data);
                 ggml_ane_exec_add(node);
-                GGML_ANE_LOG_DEBUG("ADD result: dst[0]=%.6f", *(float *)node->data);
+                {
+                    float result = *(float *)node->data;
+                    GGML_ANE_LOG_DEBUG("ADD result: dst[0]=%.6f", result);
+                    if (result != result && g_first_nan_graph < 0) {
+                        g_first_nan_graph = g_graph_count;
+                        GGML_ANE_LOG_WARN("*** NaN PRODUCED by ADD at GRAPH #%d ***", g_graph_count);
+                    }
+                }
                 break;
             
             case GGML_OP_MUL:
                 GGML_ANE_LOG_DEBUG("MUL: dst=%p, src0=%p, src1=%p", node, node->src[0], node->src[1]);
                 ggml_ane_exec_mul(node);
-                // Check output
-                GGML_ANE_LOG_DEBUG("MUL result: dst[0]=%.6f, dst[1]=%.6f", 
-                                   *(float *)node->data, *((float *)node->data + 1));
+                {
+                    float result = *(float *)node->data;
+                    GGML_ANE_LOG_DEBUG("MUL result: dst[0]=%.6f, dst[1]=%.6f", 
+                                       result, *((float *)node->data + 1));
+                    if (result != result && g_first_nan_graph < 0) {
+                        g_first_nan_graph = g_graph_count;
+                        GGML_ANE_LOG_WARN("*** NaN PRODUCED by MUL at GRAPH #%d ***", g_graph_count);
+                    }
+                }
                 break;
             
             case GGML_OP_RMS_NORM:
                 GGML_ANE_LOG_DEBUG("RMS_NORM: src=%p, src[0]=%.6f, ne00=%ld", 
                                    node->src[0], *(float *)node->src[0]->data, node->src[0]->ne[0]);
                 ggml_ane_exec_rms_norm(node);
-                GGML_ANE_LOG_DEBUG("RMS_NORM result: dst[0]=%.6f", *(float *)node->data);
+                {
+                    float result = *(float *)node->data;
+                    GGML_ANE_LOG_DEBUG("RMS_NORM result: dst[0]=%.6f", result);
+                    if (result != result && g_first_nan_graph < 0) {
+                        g_first_nan_graph = g_graph_count;
+                        GGML_ANE_LOG_WARN("*** NaN PRODUCED by RMS_NORM at GRAPH #%d ***", g_graph_count);
+                    }
+                }
                 break;
             
             case GGML_OP_SOFT_MAX:
@@ -819,7 +852,11 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
     if (supported_ops > 0) {
         GGML_ANE_LOG_DEBUG("ANE: processed %d ops", supported_ops);
     }
-    GGML_ANE_LOG_INFO("=== ANE GRAPH END ===");
+    if (g_first_nan_graph > 0) {
+        GGML_ANE_LOG_INFO("=== ANE GRAPH #%d END (NaN started at #%d) ===", g_graph_count, g_first_nan_graph);
+    } else {
+        GGML_ANE_LOG_INFO("=== ANE GRAPH #%d END ===", g_graph_count);
+    }
     return GGML_STATUS_SUCCESS;
     
     GGML_UNUSED(backend);

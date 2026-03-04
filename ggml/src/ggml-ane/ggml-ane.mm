@@ -967,6 +967,14 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
     if (supported_ops > 0) {
         GGML_ANE_LOG_DEBUG("ANE: processed %d ops", supported_ops);
     }
+    
+    // If we have unsupported ops, return FAILED so scheduler can route them to CPU/Metal
+    // Otherwise downstream ops will have undefined inputs
+    if (unsupported_ops > 0) {
+        GGML_ANE_LOG_DEBUG("ANE: returning FAILED due to %d unsupported ops", unsupported_ops);
+        return GGML_STATUS_FAILED;
+    }
+    
     if (g_first_nan_graph > 0) {
         GGML_ANE_LOG_INFO("=== ANE GRAPH #%d END (NaN started at #%d) ===", g_graph_count, g_first_nan_graph);
     } else {

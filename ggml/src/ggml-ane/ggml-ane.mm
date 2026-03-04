@@ -402,9 +402,11 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     
     // Prepare input data
     // src1 has ne[0]=K, ne[1]=M
-    // Element (k, m) in ggml: offset = k * nb[0] + m * nb[1]
-    // ANE expects [1, K, 1, M] in NCHW: element (k, m) at offset k*M + m
-    // Need to transpose!
+    // ANE expects [1, K, 1, M] in NCHW format
+    // For contiguous tensor: element (k, m) at k*M + m
+    // But ggml stores: element (k, m) at k*nb[0] + m*nb[1]
+    // If nb[0]=4 and nb[1]=K*4, then ggml layout IS [K, M] row-major
+    // which matches ANE's [1, K, 1, M] NCHW! NO TRANSPOSE NEEDED!
     
     GGML_ANE_LOG_DEBUG("src1 type: %d (F16=%d, F32=%d)", src1->type, GGML_TYPE_F16, GGML_TYPE_F32);
     GGML_ANE_LOG_DEBUG("src1: ne[0]=%ld, ne[1]=%ld, nb[0]=%ld, nb[1]=%ld",
@@ -414,26 +416,27 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     
     if (src1->type == GGML_TYPE_F16) {
         const ggml_fp16_t * src1_f16 = (const ggml_fp16_t *)src1->data;
-        GGML_ANE_LOG_DEBUG("src1 is FP16, converting to FP32 and transposing");
+        GGML_ANE_LOG_DEBUG("src1 is FP16, converting to FP32");
         
-        // Transpose from ggml [K, M] to ANE [1, K, 1, M]
-        for (int64_t k = 0; k < K; k++) {
-            for (int64_t m = 0; m < M; m++) {
-                // ggml: element at (k, m) = k * nb[0] + m * nb[1]
-                const ggml_fp16_t * in_ptr = (const ggml_fp16_t *)((const char *)src1_f16 + k * src1->nb[0] + m * src1->nb[1]);
-                input_x[k * M + m] = ggml_fp16_to_fp32(*in_ptr);
-            }
+        // Convert FP16 to FP32, keeping same layout (no transpose)
+        for (int64_t i = 0; i < K * M; i++) {
+            input_x[i] = ggml_fp16_to_fp32(src1_f16[i]);
         }
     } else {
         const float * src1_f32 = (const float *)src1->data;
-        GGML_ANE_LOG_DEBUG("src1 is FP32, transposing");
+        GGML_ANE_LOG_DEBUG("src1 is FP32");
         
-        // Transpose from ggml [K, M] to ANE [1, K, 1, M]
-        for (int64_t k = 0; k < K; k++) {
-            for (int64_t m = 0; m < M; m++) {
-                // ggml: element at (k, m) = k * nb[0] + m * nb[1]
-                const float * in_ptr = (const float *)((const char *)src1_f32 + k * src1->nb[0] + m * src1->nb[1]);
-                input_x[k * M + m] = *in_ptr;
+        // Check if contiguous for fast path
+        if (src1->nb[0] == sizeof(float) && src1->nb[1] == K * sizeof(float)) {
+            GGML_ANE_LOG_DEBUG("src1 is contiguous, using memcpy");
+            memcpy(input_x, src1_f32, K * M * sizeof(float));
+        } else {
+            GGML_ANE_LOG_DEBUG("src1 is non-contiguous, using stride copy");
+            for (int64_t k = 0; k < K; k++) {
+                for (int64_t m = 0; m < M; m++) {
+                    const float * in_ptr = (const float *)((const char *)src1_f32 + k * src1->nb[0] + m * src1->nb[1]);
+                    input_x[k * M + m] = *in_ptr;
+                }
             }
         }
     }
@@ -459,16 +462,22 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
         return false;
     }
     
-    // Copy output to dst with transpose
+    // Copy output to dst
     // ANE output is [1, N, 1, M] in NCHW: element (n, m) at offset n*M + m
-    // ggml dst is [N, M]: element (n, m) at offset m*N + n (since ne[0]=N, ne[1]=M)
+    // ggml dst has ne[0]=N, ne[1]=M: element (n, m) at offset n*nb[0] + m*nb[1]
+    // If contiguous (nb[0]=4, nb[1]=N*4): same layout! NO TRANSPOSE NEEDED!
     float * dst_data = (float *)dst->data;
-    for (int64_t n = 0; n < N; n++) {
-        for (int64_t m = 0; m < M; m++) {
-            // ANE: output[n * M + m]
-            // ggml: dst_data[m * N + n]  (or with strides: m * nb[1] + n * nb[0])
-            float * dst_ptr = (float *)((char *)dst_data + m * dst->nb[1] + n * dst->nb[0]);
-            *dst_ptr = output[n * M + m];
+    
+    if (dst->nb[0] == sizeof(float) && dst->nb[1] == N * sizeof(float)) {
+        // Contiguous - direct copy
+        memcpy(dst_data, output, N * M * sizeof(float));
+    } else {
+        // Non-contiguous - use strides
+        for (int64_t n = 0; n < N; n++) {
+            for (int64_t m = 0; m < M; m++) {
+                float * dst_ptr = (float *)((char *)dst_data + n * dst->nb[0] + m * dst->nb[1]);
+                *dst_ptr = output[n * M + m];
+            }
         }
     }
     

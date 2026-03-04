@@ -743,11 +743,11 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
                 break;
             
             case GGML_OP_MUL:
-                GGML_ANE_LOG_DEBUG("MUL: dst=%p, src0=%p, src1=%p", dst, dst->src[0], dst->src[1]);
+                GGML_ANE_LOG_DEBUG("MUL: dst=%p, src0=%p, src1=%p", node, node->src[0], node->src[1]);
                 ggml_ane_exec_mul(node);
                 // Check output
                 GGML_ANE_LOG_DEBUG("MUL result: dst[0]=%.6f, dst[1]=%.6f", 
-                                   *(float *)dst->data, *((float *)dst->data + 1));
+                                   *(float *)node->data, *((float *)node->data + 1));
                 break;
             
             case GGML_OP_RMS_NORM:

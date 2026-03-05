@@ -337,20 +337,47 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
         // Build weight blob
         // Weights need to be [out_ch, in_ch] for conv format
         float * weights_transposed = nullptr;
-        const float * weights = (const float *)src0->data;
+        const float * weights = nullptr;
         
-        if (src0_transposed) {
-            // Already [N, K] = [out_ch, in_ch], use directly
-            weights_transposed = nullptr;
-        } else {
-            // Need to transpose from [K, N] to [N, K]
-            weights_transposed = (float *)malloc(out_ch * in_ch * sizeof(float));
-            for (int64_t n = 0; n < out_ch; n++) {
-                for (int64_t k = 0; k < in_ch; k++) {
-                    weights_transposed[n * in_ch + k] = weights[k * out_ch + n];
+        // Handle FP16 and FP32 weights
+        if (src0->type == GGML_TYPE_F16) {
+            const ggml_fp16_t * weights_f16 = (const ggml_fp16_t *)src0->data;
+            
+            if (src0_transposed) {
+                // Already [N, K] = [out_ch, in_ch], just convert to FP32
+                weights_transposed = (float *)malloc(out_ch * in_ch * sizeof(float));
+                for (int64_t i = 0; i < out_ch * in_ch; i++) {
+                    weights_transposed[i] = ggml_fp16_to_fp32(weights_f16[i]);
                 }
+                weights = weights_transposed;
+            } else {
+                // Need to transpose from [K, N] to [N, K] and convert to FP32
+                weights_transposed = (float *)malloc(out_ch * in_ch * sizeof(float));
+                for (int64_t n = 0; n < out_ch; n++) {
+                    for (int64_t k = 0; k < in_ch; k++) {
+                        weights_transposed[n * in_ch + k] = ggml_fp16_to_fp32(weights_f16[k * out_ch + n]);
+                    }
+                }
+                weights = weights_transposed;
             }
-            weights = weights_transposed;
+        } else {
+            // FP32 weights
+            const float * weights_f32 = (const float *)src0->data;
+            
+            if (src0_transposed) {
+                // Already [N, K] = [out_ch, in_ch], use directly
+                weights = weights_f32;
+                weights_transposed = nullptr;
+            } else {
+                // Need to transpose from [K, N] to [N, K]
+                weights_transposed = (float *)malloc(out_ch * in_ch * sizeof(float));
+                for (int64_t n = 0; n < out_ch; n++) {
+                    for (int64_t k = 0; k < in_ch; k++) {
+                        weights_transposed[n * in_ch + k] = weights_f32[k * out_ch + n];
+                    }
+                }
+                weights = weights_transposed;
+            }
         }
         
         NSData * weight_blob = ggml_ane_build_weight_blob(weights, out_ch, in_ch);
@@ -385,14 +412,25 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     }
     
     // Prepare input data
-    // Input is [K, M] in row-major, ANE expects [1, K, 1, M]
+    // Input is [K, M] row-major, ANE expects [1, K, 1, M]
     float * input_conv = (float *)malloc(in_ch * spatial * sizeof(float));
-    const float * src1_data = (const float *)src1->data;
     
-    for (int64_t m = 0; m < spatial; m++) {
-        for (int64_t k = 0; k < in_ch; k++) {
-            // src1 is [K, M] row-major, ANE wants [K, M] but as [1, K, 1, M]
-            input_conv[k * spatial + m] = src1_data[m * in_ch + k];
+    // Handle FP16 and FP32 input
+    if (src1->type == GGML_TYPE_F16) {
+        const ggml_fp16_t * src1_data = (const ggml_fp16_t *)src1->data;
+        for (int64_t m = 0; m < spatial; m++) {
+            for (int64_t k = 0; k < in_ch; k++) {
+                // src1 is [K, M] row-major, ANE wants [K, M] but as [1, K, 1, M]
+                input_conv[k * spatial + m] = ggml_fp16_to_fp32(src1_data[m * in_ch + k]);
+            }
+        }
+    } else {
+        const float * src1_data = (const float *)src1->data;
+        for (int64_t m = 0; m < spatial; m++) {
+            for (int64_t k = 0; k < in_ch; k++) {
+                // src1 is [K, M] row-major, ANE wants [K, M] but as [1, K, 1, M]
+                input_conv[k * spatial + m] = src1_data[m * in_ch + k];
+            }
         }
     }
     

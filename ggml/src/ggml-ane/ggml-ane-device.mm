@@ -49,11 +49,11 @@ static const char * ggml_backend_ane_device_get_description(ggml_backend_dev_t d
 }
 
 static void ggml_backend_ane_device_get_memory(ggml_backend_dev_t dev, size_t * free, size_t * total) {
-    // Report enough memory to get some layers assigned
-    // This is a balance: too little = no compute, too much = OOM
-    // Start with 8GB - enough for medium models to split layers
-    *total = 8ULL * 1024ULL * 1024ULL * 1024ULL;  // 8 GB
-    *free = 8ULL * 1024ULL * 1024ULL * 1024ULL;
+    // Report limited memory to prevent llama.cpp from putting model weights on ANE
+    // ANE uses unified memory - weights should stay on Metal/CPU
+    // We only need enough for compute buffers (activations)
+    *total = 256 * 1024 * 1024;  // 256 MB
+    *free = 256 * 1024 * 1024;
     GGML_UNUSED(dev);
 }
 
@@ -193,42 +193,24 @@ static bool ggml_backend_ane_device_supports_buft(ggml_backend_dev_t dev, ggml_b
 }
 
 static bool ggml_backend_ane_device_offload_op(ggml_backend_dev_t dev, const struct ggml_tensor * op) {
-    // Tell the scheduler we want these ops routed to ANE
-    // This is key for getting compute assigned to ANE
-    switch (op->op) {
-        case GGML_OP_MUL_MAT:
-            // Check if large enough to be worth offloading
-            if (op->src[0] && op->src[1]) {
-                const int64_t ne0 = op->src[0]->ne[0];
-                const int64_t ne1 = op->src[0]->ne[1];
-                const int64_t M = op->src[1]->ne[1];
-                
-                // Skip small matrices (CPU faster)
-                if (ne0 * ne1 * M < 64 * 1024) {
-                    return false;
-                }
-            }
-            return true;
-            
-        case GGML_OP_ADD:
-        case GGML_OP_MUL:
-        case GGML_OP_RMS_NORM:
-        case GGML_OP_SOFT_MAX:
-            // Elementwise ops - offload to ANE
-            return true;
-            
-        case GGML_OP_VIEW:
-        case GGML_OP_RESHAPE:
-        case GGML_OP_PERMUTE:
-        case GGML_OP_TRANSPOSE:
-        case GGML_OP_CONT:
-        case GGML_OP_CPY:
-            // Metadata ops - can run anywhere
-            return true;
-            
-        default:
-            return false;
+    if (!ggml_backend_ane_device_supports_op(dev, op)) {
+        return false;
     }
+    
+    // ANE excels at matrix multiplication
+    if (op->op == GGML_OP_MUL_MAT) {
+        const int64_t ne0 = op->src[0]->ne[0];
+        const int64_t ne1 = op->src[0]->ne[1];
+        
+        // Too small = not worth the dispatch overhead
+        if (ne0 * ne1 < 256 * 256) {
+            return false;
+        }
+        
+        return true;
+    }
+    
+    return false;
     GGML_UNUSED(dev);
 }
 
@@ -278,7 +260,7 @@ bool ggml_ane_device_init(void) {
         g_ane_device_ctx.supports_int8 = true;
         
         NSProcessInfo *pi = [NSProcessInfo processInfo];
-        g_ane_device_ctx.memory_size = 8ULL * 1024ULL * 1024ULL * 1024ULL;  // 8GB reported
+        g_ane_device_ctx.memory_size = 256 * 1024 * 1024;  // Limited for compute
         
         // Initialize device struct
         g_ane_device.iface = ggml_backend_ane_device_interface;
@@ -290,7 +272,7 @@ bool ggml_ane_device_init(void) {
         // Set the device pointer in the buffer type
         ggml_backend_ane_buffer_type_set_device(&g_ane_device);
         
-        GGML_ANE_LOG_INFO("ANE device initialized: 8 GB (unified memory access)");
+        GGML_ANE_LOG_INFO("ANE device initialized: 256 MB compute buffer (unified memory access)");
         return true;
     }
     #else

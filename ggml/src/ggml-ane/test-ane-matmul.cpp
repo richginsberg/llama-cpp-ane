@@ -21,7 +21,7 @@
 #endif
 
 // Test matrix dimensions
-// Using original working dimensions
+// Using sizes that are large enough to benefit from ANE
 constexpr int DIM_M = 64;      // Batch size / sequence length (spatial dim)
 constexpr int DIM_K = 256;     // Input dimension (in_ch)
 constexpr int DIM_N = 128;     // Output dimension (out_ch)

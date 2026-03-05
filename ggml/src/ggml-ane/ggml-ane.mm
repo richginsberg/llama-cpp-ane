@@ -336,6 +336,9 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     
     // Compile kernel if not cached
     if (!kernel) {
+        GGML_ANE_LOG_INFO("[ANE] Compiling kernel for MUL_MAT: in_ch=%ld, out_ch=%ld, spatial=%ld (padded=%ld)", 
+                          in_ch, out_ch, spatial, spatial_padded);
+        
         // Generate MIL for conv-based matmul with padded spatial
         NSString * mil = ggml_ane_gen_mil_conv(in_ch, out_ch, spatial_padded);
         const char * mil_cstr = [mil UTF8String];
@@ -447,6 +450,8 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     // Execute
     const void * inputs[1] = { input_conv };
     void * outputs[1] = { output_conv };
+    
+    GGML_ANE_LOG_INFO("[ANE] Executing MUL_MAT: %ldx%ldx%ld", in_ch, out_ch, spatial);
     
     bool success = ggml_ane_execute(kernel, inputs, outputs);
     
@@ -568,9 +573,11 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
     
     // If we can't handle all ops, let ggml fall back to CPU/Metal
     if (unsupported_ops > 0) {
-        GGML_ANE_LOG_INFO("ANE: falling back to CPU/Metal (%d unsupported ops)", unsupported_ops);
+        GGML_ANE_LOG_INFO("[ANE] REJECTED: Falling back to CPU/Metal (%d unsupported ops)", unsupported_ops);
         return GGML_STATUS_FAILED;
     }
+    
+    GGML_ANE_LOG_INFO("[ANE] ACCEPTED: Processing graph with %d MUL_MAT ops", mul_mat_ops);
     
     // Process each node
     for (int i = 0; i < cgraph->n_nodes; i++) {

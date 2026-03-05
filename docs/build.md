@@ -114,6 +114,65 @@ Check [Optimizing and Running LLaMA2 on Intel® CPU](https://www.intel.com/conte
 
 Any other BLAS library can be used by setting the `GGML_BLAS_VENDOR` option. See the [CMake documentation](https://cmake.org/cmake/help/latest/module/FindBLAS.html#blas-lapack-vendors) for a list of supported vendors.
 
+## ANE Build
+
+On Apple Silicon Macs, the Apple Neural Engine (ANE) can accelerate LLM inference. The ANE backend uses private `_ANEClient` APIs from AppleNeuralEngine.framework to execute matrix multiplication operations on the Neural Engine.
+
+### Prerequisites
+
+- macOS 15+ (Sequoia) on Apple Silicon (M1/M2/M3/M4)
+- Xcode with Command Line Tools
+- CMake 3.16+
+
+### Build
+
+```bash
+cmake -B build -DGGML_ANE=ON
+cmake --build build --config Release -j 8
+```
+
+### Usage
+
+The ANE backend is automatically enabled when available. To explicitly use ANE:
+
+```bash
+# Run with ANE acceleration
+./build/bin/llama-cli -m model.gguf -p "Hello" -n 50
+
+# Disable ANE at runtime (fall back to CPU/Metal)
+GGML_ANE=0 ./build/bin/llama-cli -m model.gguf -p "Hello" -n 50
+```
+
+### Supported Operations
+
+The ANE backend currently supports:
+- **MUL_MAT**: Matrix multiplication (primary ANE operation)
+- **CPU fallback**: ADD, MUL, RMS_NORM, SOFT_MAX (executed on CPU within ANE backend)
+- **Metadata ops**: VIEW, RESHAPE, PERMUTE, TRANSPOSE, CONT, CPY (no compute needed)
+
+### Limitations
+
+- Only FP16 and FP32 weights are supported (quantized weights fall back to CPU/Metal)
+- Minimum spatial dimension of 16 for ANE conv operations (smaller batches are padded)
+- Maximum working set size of ~64MB (larger operations fall back to CPU/Metal)
+- ANE kernels are cached for repeated dimensions
+
+### Performance
+
+Performance varies by model and hardware. Typical results on M2 Max:
+- **Prompt processing**: 370-950 t/s (depending on KV cache warmth)
+- **Token generation**: 90-110 t/s
+
+The ANE backend works alongside Metal - both can be active simultaneously. ANE handles MUL_MAT operations while Metal handles other GPU operations.
+
+### Debugging
+
+Enable ANE debug logging:
+
+```bash
+GGML_ANE_DEBUG=1 ./build/bin/llama-cli -m model.gguf -p "Test" -n 5
+```
+
 ## Metal Build
 
 On MacOS, Metal is enabled by default. Using Metal makes the computation run on the GPU.

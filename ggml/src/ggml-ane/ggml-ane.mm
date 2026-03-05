@@ -304,20 +304,26 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     }
     spatial = M;
     
+    // ANE requires minimum spatial dimension of 16 for conv operations
+    // Pad to at least 16 to avoid "Program Inference error"
+    const int64_t spatial_padded = (spatial < 16) ? 16 : spatial;
+    
     // Skip if too small (not worth ANE overhead)
     if (in_ch * out_ch * spatial < 64 * 1024) {
         return false;  // < 64K elements, CPU is faster
     }
     
     // Skip if too large for ANE SRAM (~32MB working set)
-    size_t working_set = in_ch * out_ch * 2 + in_ch * spatial * 2 + out_ch * spatial * 2;
+    // Use padded spatial for working set calculation
+    size_t working_set = in_ch * out_ch * 2 + in_ch * spatial_padded * 2 + out_ch * spatial_padded * 2;
     if (working_set > 64 * 1024 * 1024) {  // 64MB limit (allow some spill)
         GGML_ANE_LOG_DEBUG("MUL_MAT too large for ANE: %zu MB working set", working_set / (1024 * 1024));
         return false;
     }
     
     // Check if we have a cached kernel for these dimensions
-    uint64_t hash = hash_matmul_dims(in_ch, out_ch, spatial);
+    // Use padded spatial for hash to ensure cache hit
+    uint64_t hash = hash_matmul_dims(in_ch, out_ch, spatial_padded);
     
     ggml_ane_kernel_t kernel = nullptr;
     {
@@ -330,8 +336,8 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     
     // Compile kernel if not cached
     if (!kernel) {
-        // Generate MIL for conv-based matmul
-        NSString * mil = ggml_ane_gen_mil_conv(in_ch, out_ch, spatial);
+        // Generate MIL for conv-based matmul with padded spatial
+        NSString * mil = ggml_ane_gen_mil_conv(in_ch, out_ch, spatial_padded);
         const char * mil_cstr = [mil UTF8String];
         
         // Build weight blob
@@ -387,8 +393,8 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
         }
         
         // Compile
-        size_t input_size = in_ch * spatial * sizeof(float);
-        size_t output_size = out_ch * spatial * sizeof(float);
+        size_t input_size = in_ch * spatial_padded * sizeof(float);
+        size_t output_size = out_ch * spatial_padded * sizeof(float);
         
         kernel = ggml_ane_compile_kernel(
             mil_cstr,
@@ -412,30 +418,31 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     }
     
     // Prepare input data
-    // Input is [K, M] row-major, ANE expects [1, K, 1, M]
-    float * input_conv = (float *)malloc(in_ch * spatial * sizeof(float));
+    // Input is [K, M] row-major, ANE expects [1, K, 1, M_padded]
+    // Pad with zeros for spatial_padded > spatial
+    float * input_conv = (float *)calloc(in_ch * spatial_padded, sizeof(float));  // Zero-initialized
     
     // Handle FP16 and FP32 input
     if (src1->type == GGML_TYPE_F16) {
         const ggml_fp16_t * src1_data = (const ggml_fp16_t *)src1->data;
-        for (int64_t m = 0; m < spatial; m++) {
+        for (int64_t m = 0; m < spatial; m++) {  // Only copy valid M elements
             for (int64_t k = 0; k < in_ch; k++) {
-                // src1 is [K, M] row-major, ANE wants [K, M] but as [1, K, 1, M]
-                input_conv[k * spatial + m] = ggml_fp16_to_fp32(src1_data[m * in_ch + k]);
+                // src1 is [K, M] row-major, ANE wants [K, M_padded]
+                input_conv[k * spatial_padded + m] = ggml_fp16_to_fp32(src1_data[m * in_ch + k]);
             }
         }
     } else {
         const float * src1_data = (const float *)src1->data;
-        for (int64_t m = 0; m < spatial; m++) {
+        for (int64_t m = 0; m < spatial; m++) {  // Only copy valid M elements
             for (int64_t k = 0; k < in_ch; k++) {
-                // src1 is [K, M] row-major, ANE wants [K, M] but as [1, K, 1, M]
-                input_conv[k * spatial + m] = src1_data[m * in_ch + k];
+                // src1 is [K, M] row-major, ANE wants [K, M_padded]
+                input_conv[k * spatial_padded + m] = src1_data[m * in_ch + k];
             }
         }
     }
     
-    // Allocate output
-    float * output_conv = (float *)malloc(out_ch * spatial * sizeof(float));
+    // Allocate output (padded size)
+    float * output_conv = (float *)malloc(out_ch * spatial_padded * sizeof(float));
     
     // Execute
     const void * inputs[1] = { input_conv };
@@ -450,12 +457,12 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
         return false;
     }
     
-    // Convert output back to row-major [N, M]
+    // Convert output back to row-major [N, M] (only copy valid M elements, skip padding)
     float * dst_data = (float *)dst->data;
-    for (int64_t m = 0; m < spatial; m++) {
+    for (int64_t m = 0; m < spatial; m++) {  // Only copy valid M elements
         for (int64_t n = 0; n < out_ch; n++) {
-            // ANE output is [1, N, 1, M], convert to [N, M] row-major
-            dst_data[m * out_ch + n] = output_conv[n * spatial + m];
+            // ANE output is [1, N, 1, M_padded], convert to [N, M] row-major
+            dst_data[m * out_ch + n] = output_conv[n * spatial_padded + m];
         }
     }
     

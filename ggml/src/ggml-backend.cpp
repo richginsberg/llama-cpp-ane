@@ -837,8 +837,10 @@ static int ggml_backend_sched_backend_id_from_cur(ggml_backend_sched_t sched, st
             }
             SET_CAUSE(tensor, "1.wgt%d", i);
             // DEBUG: Log which backend is selected based on weight location
-            fprintf(stderr, "[SCHED] Op %s assigned to backend %d based on weight src[%d]\n", 
-                    ggml_op_name(tensor->op), src_backend_id, i);
+            fprintf(stderr, "[SCHED] Op %s assigned to backend %d (%s) based on weight src[%d] (buffer=%p, name=%s)\n", 
+                    ggml_op_name(tensor->op), src_backend_id, 
+                    sched->backends[src_backend_id]->iface.get_name(sched->backends[src_backend_id]),
+                    i, src->buffer, src->buffer ? ggml_backend_buffer_name(src->buffer) : "NULL");
             return src_backend_id;
         }
     }

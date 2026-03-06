@@ -129,6 +129,8 @@ static ggml_backend_buffer_t ggml_backend_ane_device_buffer_from_host_ptr(ggml_b
 }
 
 static bool ggml_backend_ane_device_supports_op(ggml_backend_dev_t dev, const struct ggml_tensor * op) {
+    GGML_ANE_LOG_DEBUG("[ANE] supports_op called: op=%s", ggml_op_name(op->op));
+    
 #ifdef __APPLE__
     #if TARGET_CPU_ARM64
     // ANE supports these operations (MIL can express them)
@@ -137,11 +139,14 @@ static bool ggml_backend_ane_device_supports_op(ggml_backend_dev_t dev, const st
             // Matrix multiplication - primary ANE operation
             // Check if quantized (ANE only supports FP16/FP32)
             if (op->src[0] && op->src[0]->type != GGML_TYPE_F32 && op->src[0]->type != GGML_TYPE_F16) {
+                GGML_ANE_LOG_DEBUG("[ANE] supports_op: MUL_MAT REJECTED (quantized weights)");
                 return false;
             }
             if (op->src[1] && op->src[1]->type != GGML_TYPE_F32 && op->src[1]->type != GGML_TYPE_F16) {
+                GGML_ANE_LOG_DEBUG("[ANE] supports_op: MUL_MAT REJECTED (quantized input)");
                 return false;
             }
+            GGML_ANE_LOG_DEBUG("[ANE] supports_op: MUL_MAT ACCEPTED");
             return true;
             
         case GGML_OP_ADD:
@@ -202,11 +207,15 @@ static bool ggml_backend_ane_device_offload_op(ggml_backend_dev_t dev, const str
         const int64_t ne0 = op->src[0]->ne[0];
         const int64_t ne1 = op->src[0]->ne[1];
         
+        GGML_ANE_LOG_DEBUG("[ANE] offload_op check: MUL_MAT ne0=%ld, ne1=%ld, size=%ld", ne0, ne1, ne0*ne1);
+        
         // Too small = not worth the dispatch overhead
         if (ne0 * ne1 < 256 * 256) {
+            GGML_ANE_LOG_DEBUG("[ANE] offload_op: REJECTED (too small)");
             return false;
         }
         
+        GGML_ANE_LOG_DEBUG("[ANE] offload_op: ACCEPTED");
         return true;
     }
     

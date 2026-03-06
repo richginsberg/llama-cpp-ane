@@ -317,10 +317,16 @@ using buft_list_t = std::vector<std::pair<ggml_backend_dev_t, ggml_backend_buffe
 // find the first buffer type in the list that can use the tensor
 static ggml_backend_buffer_type_t select_weight_buft(const llama_hparams & hparams, ggml_tensor * tensor, ggml_op op, const buft_list_t & buft_list) {
     GGML_ASSERT(!buft_list.empty());
+    fprintf(stderr, "[DEBUG] select_weight_buft: tensor=%s, op=%s, buft_list.size()=%zu\n", 
+            tensor->name, ggml_op_name(op), buft_list.size());
     for (const auto & cur : buft_list) {
         ggml_backend_dev_t cur_dev = cur.first;
         ggml_backend_buffer_type_t cur_buft = cur.second;
+        fprintf(stderr, "[DEBUG]   checking buft: dev=%s, buft=%s\n", 
+                ggml_backend_dev_name(cur_dev), ggml_backend_buft_name(cur_buft));
         if (weight_buft_supported(hparams, tensor, op, cur_buft, cur_dev)) {
+            fprintf(stderr, "[DEBUG]   SELECTED: dev=%s, buft=%s\n", 
+                    ggml_backend_dev_name(cur_dev), ggml_backend_buft_name(cur_buft));
             return cur_buft;
         }
     }

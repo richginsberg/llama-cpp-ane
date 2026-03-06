@@ -114,6 +114,8 @@ static const char * ggml_backend_ane_buffer_type_get_name(ggml_backend_buffer_ty
 }
 
 static ggml_backend_buffer_t ggml_backend_ane_buffer_type_alloc_buffer(ggml_backend_buffer_type_t buft, size_t size) {
+    fprintf(stderr, "[ANE] alloc_buffer called: %zu bytes\n", size);
+    
 #ifdef __APPLE__
     @autoreleasepool {
         // Align to page boundary

@@ -972,6 +972,17 @@ static struct llama_model * llama_model_load_from_file_impl(
         // add GPUs
         model->devices.insert(model->devices.end(), gpus.begin(), gpus.end());
 
+        // DEBUG: Log which devices are in the model
+        fprintf(stderr, "[DEBUG] Model devices (%zu total):\n", model->devices.size());
+        for (size_t i = 0; i < model->devices.size(); i++) {
+            ggml_backend_dev_props props;
+            ggml_backend_dev_get_props(model->devices[i], &props);
+            fprintf(stderr, "[DEBUG]   Device %zu: %s (%s), type=%d\n", 
+                    i, ggml_backend_dev_name(model->devices[i]), 
+                    ggml_backend_dev_description(model->devices[i]),
+                    props.type);
+        }
+
         // add integrated GPUs only if no other devices were found
         if (model->devices.empty()) {
             model->devices.insert(model->devices.end(), igpus.begin(), igpus.end());

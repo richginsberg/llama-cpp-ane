@@ -478,6 +478,8 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
 }
 
 static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, struct ggml_cgraph * cgraph) {
+    fprintf(stderr, "[ANE] ========== GRAPH COMPUTE CALLED: %d nodes ==========\n", cgraph->n_nodes);
+    
     if (!GGML_ANE_AVAILABLE) {
         GGML_ANE_LOG_DEBUG("ANE not available on this platform");
         return GGML_STATUS_FAILED;

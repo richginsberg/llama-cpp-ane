@@ -88,6 +88,7 @@ static ggml_backend_t ggml_backend_ane_device_init_backend(ggml_backend_dev_t de
 
 static ggml_backend_buffer_type_t ggml_backend_ane_device_get_buffer_type(ggml_backend_dev_t dev) {
     // Return ANE buffer type - uses unified memory (regular malloc)
+    fprintf(stderr, "[ANE] get_buffer_type called, returning ANE buffer type\n");
     return ggml_backend_ane_buffer_type();
     GGML_UNUSED(dev);
 }

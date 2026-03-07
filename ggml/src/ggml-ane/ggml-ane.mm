@@ -368,6 +368,17 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
         if (src0->type == GGML_TYPE_F16) {
             const ggml_fp16_t * weights_f16 = (const ggml_fp16_t *)src0->data;
             
+            // Check if the pointer is valid and data is accessible
+            fprintf(stderr, "[ANE] Reading weights: src0->data=%p, type=F16, count=%ld\n",
+                    src0->data, out_ch * in_ch);
+            
+            // Try to read first few values to verify access
+            float test_sum = 0.0f;
+            for (int64_t i = 0; i < std::min(out_ch * in_ch, (int64_t)10); i++) {
+                test_sum += ggml_fp16_to_fp32(weights_f16[i]);
+            }
+            fprintf(stderr, "[ANE] Weight access test: sum=%.4f (first 10 values)\n", test_sum);
+            
             if (src0_transposed) {
                 // Already [N, K] = [out_ch, in_ch], just convert to FP32
                 weights_transposed = (float *)malloc(out_ch * in_ch * sizeof(float));

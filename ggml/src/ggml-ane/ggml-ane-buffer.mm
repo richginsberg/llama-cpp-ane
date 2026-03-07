@@ -77,21 +77,28 @@ static void * ggml_backend_ane_buffer_get_base(ggml_backend_buffer_t buffer) {
 
 static void ggml_backend_ane_buffer_set_tensor(ggml_backend_buffer_t buffer, struct ggml_tensor * tensor, const void * data, size_t offset, size_t size) {
     ggml_ane_buffer_context * ctx = (ggml_ane_buffer_context *)buffer->context;
+    
+    fprintf(stderr, "[ANE BUFFER] set_tensor CALLED: tensor=%s, size=%zu, offset=%zu\n",
+            tensor->name ? tensor->name : "unnamed", size, offset);
+    
     if (ctx && ctx->base) {
         // Calculate the offset into the buffer
         char * base_ptr = (char *)ctx->base;
         char * tensor_ptr = (char *)tensor->data;
         size_t buffer_offset = tensor_ptr - base_ptr;
         
-        // DEBUG: Log when set_tensor is called
-        static int call_count = 0;
-        if (call_count < 5 || size > 10000) {
-            fprintf(stderr, "[ANE BUFFER] set_tensor: tensor=%s, size=%zu, offset=%zu, buffer_offset=%zu\n",
-                    tensor->name, size, offset, buffer_offset);
-            call_count++;
+        // Check if data is valid (not all zeros)
+        const float * data_f32 = (const float *)data;
+        float sum = 0.0f;
+        for (size_t i = 0; i < std::min(size / sizeof(float), (size_t)10); i++) {
+            sum += data_f32[i];
         }
+        fprintf(stderr, "[ANE BUFFER]   buffer_offset=%zu, data_sum=%.4f (first 10 floats)\n",
+                buffer_offset, sum);
         
         memcpy(base_ptr + buffer_offset + offset, data, size);
+    } else {
+        fprintf(stderr, "[ANE BUFFER]   ERROR: ctx=%p, base=%p\n", ctx, ctx ? ctx->base : nullptr);
     }
 }
 

@@ -281,6 +281,9 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     const int64_t N = src0->ne[1];
     const int64_t M = src1->ne[1];
     
+    fprintf(stderr, "[ANE] MUL_MAT dimensions: src0=[%ld,%ld] (K=%ld,N=%ld), src1=[%ld,%ld] (M=%ld), dst=[%ld,%ld]\n",
+            src0->ne[0], src0->ne[1], K, N, src1->ne[0], src1->ne[1], M, dst->ne[0], dst->ne[1]);
+    
     // Handle transposed weights (common in llama.cpp)
     // If src0->ne[0] != src1->ne[0], weights might be transposed
     bool src0_transposed = false;
@@ -288,6 +291,8 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
         // Check if transposed makes sense
         if (src0->ne[1] == src1->ne[0]) {
             src0_transposed = true;
+            fprintf(stderr, "[ANE] src0 is transposed: [%ld,%ld] means [%ld,%ld] in row-major\n",
+                    src0->ne[0], src0->ne[1], N, K);
         }
     }
     

@@ -550,7 +550,8 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
             GGML_ANE_LOG_DEBUG("  MUL_MAT %d: dimensions %ldx%ldx%ld, could use ANE", i, ne0, ne1, M);
             supported_ops++;
         } else if (node->op == GGML_OP_ADD || node->op == GGML_OP_MUL || 
-                   node->op == GGML_OP_RMS_NORM || node->op == GGML_OP_SOFT_MAX) {
+                   node->op == GGML_OP_RMS_NORM || node->op == GGML_OP_SOFT_MAX ||
+                   node->op == GGML_OP_SCALE) {
             // These ops are implemented (CPU execution within ANE backend)
             const char * op_name = ggml_op_name(node->op);
             GGML_ANE_LOG_DEBUG("  %s %d: supported (CPU execution)", op_name ? op_name : "unknown", i);
@@ -558,11 +559,12 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
         } else if (node->op == GGML_OP_VIEW || node->op == GGML_OP_RESHAPE ||
                    node->op == GGML_OP_PERMUTE || node->op == GGML_OP_TRANSPOSE ||
                    node->op == GGML_OP_CONT || node->op == GGML_OP_CPY ||
-                   node->op == GGML_OP_NONE) {
-            // Metadata ops - no compute needed
+                   node->op == GGML_OP_NONE || node->op == GGML_OP_UNARY ||
+                   node->op == GGML_OP_SILU_BACK) {
+            // Metadata ops - no compute needed, or handled elsewhere
             supported_ops++;
         } else {
-            // Unsupported op
+            // Unsupported op - log it and reject the graph
             const char * op_name = ggml_op_name(node->op);
             fprintf(stderr, "[ANE] UNSUPPORTED Op %d: %s (type=%d), not supported by ANE\n", 
                     i, op_name ? op_name : "unknown", node->op);

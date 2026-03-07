@@ -58,9 +58,8 @@ static void ggml_backend_ane_device_get_memory(ggml_backend_dev_t dev, size_t * 
 }
 
 static enum ggml_backend_dev_type ggml_backend_ane_device_get_type(ggml_backend_dev_t dev) {
-    // ANE is a neural accelerator, not a GPU
-    // Using ACCEL type gives it priority over Metal (GPU type) for supported ops
-    return GGML_BACKEND_DEVICE_TYPE_ACCEL;
+    // Return GPU type to be included in llama.cpp's device list
+    return GGML_BACKEND_DEVICE_TYPE_GPU;
     GGML_UNUSED(dev);
 }
 

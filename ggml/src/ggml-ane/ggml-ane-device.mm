@@ -148,14 +148,20 @@ static bool ggml_backend_ane_device_supports_op(ggml_backend_dev_t dev, const st
                 return false;
             }
             // ANE compiler fails for small spatial dimensions (M<8)
+            // Also requires spatial to be a multiple of 16 for reliable execution
+            // Reject ops that would need padding to avoid data corruption
             if (op->src[1]) {
                 const int64_t M = op->src[1]->ne[1];  // Batch size / spatial dimension
-                if (M < 8) {
-                    fprintf(stderr, "[ANE] supports_op: MUL_MAT REJECTED (M=%ld < 8, ANE compiler limitation)\n", M);
+                if (M < 16) {
+                    fprintf(stderr, "[ANE] supports_op: MUL_MAT REJECTED (M=%ld < 16)\n", M);
+                    return false;
+                }
+                if (M % 16 != 0) {
+                    fprintf(stderr, "[ANE] supports_op: MUL_MAT REJECTED (M=%ld not multiple of 16, would need padding)\n", M);
                     return false;
                 }
             }
-            fprintf(stderr, "[ANE] supports_op: MUL_MAT ACCEPTED\n");
+            fprintf(stderr, "[ANE] supports_op: MUL_MAT ACCEPTED (M=%ld)\n", op->src[1] ? op->src[1]->ne[1] : 0);
             return true;
             
         case GGML_OP_ADD:

@@ -443,6 +443,10 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     void * outputs[1] = { output_conv };
     
     GGML_ANE_LOG_INFO("[ANE] Executing MUL_MAT: %ldx%ldx%ld", in_ch, out_ch, spatial);
+    fprintf(stderr, "[ANE] Executing MUL_MAT: in_ch=%ld, out_ch=%ld, spatial=%ld (padded=%ld)\n", 
+            in_ch, out_ch, spatial, spatial_padded);
+    fprintf(stderr, "[ANE] Kernel hash: 0x%lx, input_size: %zu bytes, output_size: %zu bytes\n",
+            hash, in_ch * spatial_padded * sizeof(float), out_ch * spatial_padded * sizeof(float));
     
     bool success = ggml_ane_execute(kernel, inputs, outputs);
     

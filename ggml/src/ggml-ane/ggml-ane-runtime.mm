@@ -379,6 +379,8 @@ bool ggml_ane_eval_kernel(ggml_ane_kernel_t kernel) {
         return false;
     }
     
+    fprintf(stderr, "[ANE] eval_kernel: nInputs=%d, nOutputs=%d\n", kernel->nInputs, kernel->nOutputs);
+    
     @autoreleasepool {
         NSError * error = nil;
         
@@ -393,10 +395,12 @@ bool ggml_ane_eval_kernel(ggml_ane_kernel_t kernel) {
         double evalTime = (CFAbsoluteTimeGetCurrent() - evalStart) * 1000.0;
         
         if (!success) {
+            fprintf(stderr, "[ANE ERROR] eval_kernel FAILED: %s\n", [[error description] UTF8String]);
             GGML_ANE_LOG_ERROR("ANE evaluation failed: %s", [[error description] UTF8String]);
             return false;
         }
         
+        fprintf(stderr, "[ANE] eval_kernel SUCCESS in %.2f ms\n", evalTime);
         GGML_ANE_LOG_DEBUG("ANE kernel evaluated in %.2f ms", evalTime);
         return true;
     }

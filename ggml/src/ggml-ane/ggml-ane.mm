@@ -475,6 +475,13 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
     fprintf(stderr, "\n[ANE] =========== GRAPH COMPUTE INVOKED: %d nodes ===========\n", cgraph->n_nodes);
     fflush(stderr);
     
+    // DEBUG: Log all ops in the graph
+    fprintf(stderr, "[ANE] Graph ops: ");
+    for (int i = 0; i < cgraph->n_nodes; i++) {
+        fprintf(stderr, "%s ", ggml_op_name(cgraph->nodes[i]->op));
+    }
+    fprintf(stderr, "\n");
+    
     if (!GGML_ANE_AVAILABLE) {
         GGML_ANE_LOG_DEBUG("ANE not available on this platform");
         return GGML_STATUS_FAILED;

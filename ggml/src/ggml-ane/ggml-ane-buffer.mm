@@ -72,6 +72,15 @@ static void ggml_backend_ane_buffer_free_buffer(ggml_backend_buffer_t buffer) {
 
 static void * ggml_backend_ane_buffer_get_base(ggml_backend_buffer_t buffer) {
     ggml_ane_buffer_context * ctx = (ggml_ane_buffer_context *)buffer->context;
+    
+    // Log first few times to verify base pointer
+    static int log_count = 0;
+    if (log_count < 5) {
+        fprintf(stderr, "[ANE BUFFER] get_base: returning %p for buffer %p (size=%zu)\n",
+                ctx ? ctx->base : nullptr, buffer, ctx ? ctx->size : 0);
+        log_count++;
+    }
+    
     return ctx ? ctx->base : nullptr;
 }
 

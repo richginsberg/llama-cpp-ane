@@ -566,8 +566,9 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
         } else {
             // Unsupported op - log it and reject the graph
             const char * op_name = ggml_op_name(node->op);
-            fprintf(stderr, "[ANE] UNSUPPORTED Op %d: %s (type=%d), not supported by ANE\n", 
-                    i, op_name ? op_name : "unknown", node->op);
+            fprintf(stderr, "[ANE] !!! UNSUPPORTED Op %d: %s (type=%d), not supported by ANE !!!\n", 
+                    i, op_name ? op_name : "NULL", node->op);
+            fflush(stderr);
             unsupported_ops++;
         }
     }

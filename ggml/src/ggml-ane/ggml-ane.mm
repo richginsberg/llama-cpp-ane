@@ -564,8 +564,8 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
         } else {
             // Unsupported op
             const char * op_name = ggml_op_name(node->op);
-            GGML_ANE_LOG_DEBUG("  Op %d: %s (type=%d), not supported by ANE", 
-                              i, op_name ? op_name : "unknown", node->op);
+            fprintf(stderr, "[ANE] UNSUPPORTED Op %d: %s (type=%d), not supported by ANE\n", 
+                    i, op_name ? op_name : "unknown", node->op);
             unsupported_ops++;
         }
     }
@@ -575,7 +575,7 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
     
     // If we can't handle all ops, let ggml fall back to CPU/Metal
     if (unsupported_ops > 0) {
-        GGML_ANE_LOG_INFO("[ANE] REJECTED: Falling back to CPU/Metal (%d unsupported ops)", unsupported_ops);
+        fprintf(stderr, "[ANE] REJECTED: Falling back to CPU/Metal (%d unsupported ops)\n", unsupported_ops);
         return GGML_STATUS_FAILED;
     }
     

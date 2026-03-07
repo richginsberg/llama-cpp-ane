@@ -921,6 +921,10 @@ static bool ggml_backend_sched_buffer_supported(ggml_backend_sched_t sched, stru
 
 static void ggml_backend_sched_set_if_supported(ggml_backend_sched_t sched, struct ggml_tensor * node, int cur_backend_id, int * node_backend_id) {
     if (ggml_backend_supports_op(sched->backends[cur_backend_id], node)) {
+        if (node->op == GGML_OP_MUL_MAT && *node_backend_id != cur_backend_id) {
+            fprintf(stderr, "[SCHED] Pass 2: MUL_MAT changed from backend %d to backend %d (set_if_supported)\n", 
+                    *node_backend_id, cur_backend_id);
+        }
         *node_backend_id = cur_backend_id;
         SET_CAUSE(node, "2.sup");
     }
@@ -962,6 +966,9 @@ void ggml_backend_sched_split_graph(ggml_backend_sched_t sched, struct ggml_cgra
         // do not overwrite user assignments
         if (*node_backend_id == -1) {
             *node_backend_id = ggml_backend_sched_backend_id_from_cur(sched, node);
+            if (*node_backend_id != -1 && node->op == GGML_OP_MUL_MAT) {
+                fprintf(stderr, "[SCHED] Pass 1: MUL_MAT assigned to backend %d\n", *node_backend_id);
+            }
 
 #if 0
             // src

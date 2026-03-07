@@ -526,9 +526,14 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
             const int64_t ne1 = node->src[0]->ne[1];
             const int64_t M = node->src[1]->ne[1];
             
-            // Note: We don't reject small matrices anymore because in --split-mode none
-            // there's no CPU fallback. ANE can handle small matrices, just slightly slower.
-            // The overhead is acceptable compared to crashing.
+            // ANE requires minimum spatial dimension for conv operations
+            // Small M values (1-8) fail ANE compilation even when padded to 16
+            // Reject these so the scheduler can fall back to CPU/Metal
+            if (M < 8) {
+                fprintf(stderr, "[ANE] REJECT MUL_MAT %d: spatial dimension too small (M=%ld < 8)\n", i, M);
+                unsupported_ops++;
+                continue;
+            }
             
             // Check working set limit (input + output buffers only, weights already in unified memory)
             size_t working_set = ne0 * M * 2 + ne1 * M * 2;

@@ -102,6 +102,8 @@ static ggml_backend_buffer_t ggml_backend_ane_device_buffer_from_host_ptr(ggml_b
     // ANE uses unified memory, so we can wrap host pointers directly
     // Create a buffer context that wraps the existing memory
     
+    fprintf(stderr, "[ANE DEVICE] buffer_from_host_ptr CALLED: ptr=%p, size=%zu MB\n", ptr, size / (1024*1024));
+    
     ggml_ane_buffer_context * ctx = new ggml_ane_buffer_context();
     ctx->buft = ggml_backend_ane_buffer_type();
     ctx->base = ptr;
@@ -118,11 +120,12 @@ static ggml_backend_buffer_t ggml_backend_ane_device_buffer_from_host_ptr(ggml_b
     );
     
     if (!buffer) {
+        fprintf(stderr, "[ANE DEVICE] buffer_from_host_ptr FAILED to create buffer\n");
         delete ctx;
         return nullptr;
     }
     
-    GGML_ANE_LOG_DEBUG("Wrapped host ptr %p as ANE buffer: %zu bytes", ptr, size);
+    fprintf(stderr, "[ANE DEVICE] buffer_from_host_ptr SUCCESS: wrapped %zu MB\n", size / (1024*1024));
     return buffer;
     GGML_UNUSED(dev);
     GGML_UNUSED(max_tensor_size);

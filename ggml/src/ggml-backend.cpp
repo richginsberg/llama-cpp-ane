@@ -1101,7 +1101,15 @@ void ggml_backend_sched_split_graph(ggml_backend_sched_t sched, struct ggml_cgra
             }
         } else {
             // assigned node: upgrade to higher prio backend if possible
+            fprintf(stderr, "[SCHED] Node %s assigned to backend %d, checking for upgrade...\n", 
+                    ggml_op_name(node->op), *node_backend_id);
             for (int b = 0; b < *node_backend_id; b++) {
+                const char * cur_buft_name = sched->bufts[*node_backend_id] ? ggml_backend_buft_name(sched->bufts[*node_backend_id]) : "NULL";
+                const char * new_buft_name = sched->bufts[b] ? ggml_backend_buft_name(sched->bufts[b]) : "NULL";
+                fprintf(stderr, "[SCHED]   Checking upgrade to backend %d: bufts match=%d, supports_op=%d (cur buft=%s, new buft=%s)\n",
+                        b, sched->bufts[b] == sched->bufts[*node_backend_id], 
+                        ggml_backend_supports_op(sched->backends[b], node),
+                        cur_buft_name, new_buft_name);
                 if (sched->bufts[b] == sched->bufts[*node_backend_id] && ggml_backend_supports_op(sched->backends[b], node)) {
                     bool supported = true;
                     for (int j = 0; j < GGML_MAX_SRC; j++) {
@@ -1115,6 +1123,8 @@ void ggml_backend_sched_split_graph(ggml_backend_sched_t sched, struct ggml_cgra
                         }
                     }
                     if (supported) {
+                        fprintf(stderr, "[SCHED] *** UPGRADING %s from backend %d to backend %d ***\n", 
+                                ggml_op_name(node->op), *node_backend_id, b);
                         *node_backend_id = b;
                         SET_CAUSE(node, "3.upg");
                         break;

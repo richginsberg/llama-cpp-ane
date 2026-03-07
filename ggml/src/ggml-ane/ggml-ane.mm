@@ -398,6 +398,14 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
         
         NSData * weight_blob = ggml_ane_build_weight_blob(weights, out_ch, in_ch);
         
+        // Verify weights aren't all zeros
+        float weight_sum = 0.0f;
+        for (int64_t i = 0; i < std::min(out_ch * in_ch, (int64_t)100); i++) {
+            weight_sum += weights[i];
+        }
+        fprintf(stderr, "[ANE] Weights check: sum=%.4f (first 100 of %ld), src0_transposed=%d\n",
+                weight_sum, out_ch * in_ch, src0_transposed);
+        
         if (weights_transposed) {
             free(weights_transposed);
         }

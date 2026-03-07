@@ -2916,17 +2916,23 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
             }
 
             // select the buffer type for this tensor
-            buft_list_t * buft_list;
-            switch (info.layer) {
-                case LLM_TENSOR_LAYER_INPUT:
-                    buft_list = pimpl->dev_input.buft_list;
-                    break;
-                case LLM_TENSOR_LAYER_OUTPUT:
-                    buft_list = pimpl->dev_output.buft_list;
-                    break;
-                case LLM_TENSOR_LAYER_REPEATING:
-                    buft_list = pimpl->dev_layer.at(tn.bid).buft_list;
-                    break;
+        buft_list_t * buft_list;
+        switch (info.layer) {
+            case LLM_TENSOR_LAYER_INPUT:
+                buft_list = pimpl->dev_input.buft_list;
+                fprintf(stderr, "[DEBUG] Tensor %s: using INPUT buft_list (dev=%s)\n", 
+                        tn.str().c_str(), ggml_backend_dev_name(pimpl->dev_input.dev));
+                break;
+            case LLM_TENSOR_LAYER_OUTPUT:
+                buft_list = pimpl->dev_output.buft_list;
+                fprintf(stderr, "[DEBUG] Tensor %s: using OUTPUT buft_list (dev=%s)\n", 
+                        tn.str().c_str(), ggml_backend_dev_name(pimpl->dev_output.dev));
+                break;
+            case LLM_TENSOR_LAYER_REPEATING:
+                buft_list = pimpl->dev_layer.at(tn.bid).buft_list;
+                fprintf(stderr, "[DEBUG] Tensor %s: using LAYER %d buft_list (dev=%s)\n", 
+                        tn.str().c_str(), tn.bid, ggml_backend_dev_name(pimpl->dev_layer.at(tn.bid).dev));
+                break;
                 default:
                     GGML_ABORT("invalid layer %d for tensor %s", info.layer, tn.str().c_str());
             }

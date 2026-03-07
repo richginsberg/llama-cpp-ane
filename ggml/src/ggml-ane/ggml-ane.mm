@@ -485,6 +485,20 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
         }
     }
     
+    // Sanity check: verify first few output values aren't all zeros or NaN
+    if (spatial > 0 && out_ch > 0) {
+        float sum = 0.0f;
+        int nan_count = 0;
+        for (int64_t i = 0; i < std::min(out_ch * spatial, (int64_t)100); i++) {
+            sum += dst_data[i];
+            if (std::isnan(dst_data[i])) nan_count++;
+        }
+        fprintf(stderr, "[ANE] Output check: sum=%.2f (first 100), nan_count=%d\n", sum, nan_count);
+        if (nan_count > 0 || (sum == 0.0f && spatial > 0)) {
+            fprintf(stderr, "[ANE] WARNING: Output appears invalid (all zeros or NaNs)\n");
+        }
+    }
+    
     free(input_conv);
     free(output_conv);
     

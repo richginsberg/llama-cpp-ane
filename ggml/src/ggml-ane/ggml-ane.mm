@@ -304,9 +304,9 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     }
     spatial = M;
     
-    // ANE requires minimum spatial dimension of 16 for conv operations
-    // Pad to at least 16 to avoid "Program Inference error"
-    const int64_t spatial_padded = (spatial < 16) ? 16 : spatial;
+    // ANE requires minimum spatial dimension of 16 AND must be a multiple of 16
+    // Pad to next multiple of 16 to avoid "Program Inference error"
+    const int64_t spatial_padded = ((spatial + 15) / 16) * 16;
     
     // Note: Size checks removed - ANE can handle all sizes now
     // Small matrices have some overhead but work fine

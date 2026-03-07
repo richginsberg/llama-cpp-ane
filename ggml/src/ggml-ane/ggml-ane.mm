@@ -532,17 +532,13 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
             const int64_t ne1 = node->src[0]->ne[1];
             const int64_t M = node->src[1]->ne[1];
             
-            // Skip small matrices
-            if (ne0 * ne1 * M < 64 * 1024) {
-                fprintf(stderr, "[ANE] REJECT MUL_MAT %d: too small (%ldx%ldx%ld = %ld elements)\n", i, ne0, ne1, M, ne0*ne1*M);
-                unsupported_ops++;
-                continue;
-            }
+            // Note: We don't reject small matrices anymore because in --split-mode none
+            // there's no CPU fallback. ANE can handle small matrices, just slightly slower.
+            // The overhead is acceptable compared to crashing.
             
-            // Check SRAM limit - ANE has access to unified memory, not just SRAM
-            // The weights are already in unified memory, so we only need space for input/output
-            size_t working_set = ne0 * M * 2 + ne1 * M * 2;  // Just input + output, not weights
-            if (working_set > 512 * 1024 * 1024) {  // 512 MB limit for input/output buffers
+            // Check working set limit (input + output buffers only, weights already in unified memory)
+            size_t working_set = ne0 * M * 2 + ne1 * M * 2;
+            if (working_set > 512 * 1024 * 1024) {  // 512 MB limit
                 fprintf(stderr, "[ANE] REJECT MUL_MAT %d: too large (%zu MB)\n", i, working_set / (1024 * 1024));
                 unsupported_ops++;
                 continue;

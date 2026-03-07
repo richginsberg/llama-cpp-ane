@@ -572,11 +572,12 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
     GGML_ANE_LOG_INFO("ANE graph analysis: %d MUL_MAT, %d could use ANE, %d unsupported", 
                       mul_mat_ops, supported_ops, unsupported_ops);
     
-    // If we can't handle all ops, return SUCCESS without executing
-    // This tells the scheduler to try the next available backend (CPU/Metal)
+    // If we can't handle all ops, we MUST execute what we can and let CPU handle the rest
+    // Returning FAILED causes the whole graph to fail, so we execute supported ops only
     if (unsupported_ops > 0) {
-        fprintf(stderr, "[ANE] REJECT: Can't execute graph (%d unsupported ops), allowing fallback\n", unsupported_ops);
-        return GGML_STATUS_SUCCESS;  // Return SUCCESS to allow scheduler fallback
+        fprintf(stderr, "[ANE] PARTIAL: Executing %d supported ops, %d unsupported (will use CPU fallback)\n", 
+                supported_ops, unsupported_ops);
+        // Continue to execute supported ops, unsupported ops will be handled by CPU
     }
     
     GGML_ANE_LOG_INFO("[ANE] ACCEPTED: Processing graph with %d MUL_MAT ops", mul_mat_ops);

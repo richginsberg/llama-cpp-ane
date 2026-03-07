@@ -308,18 +308,9 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     // Pad to at least 16 to avoid "Program Inference error"
     const int64_t spatial_padded = (spatial < 16) ? 16 : spatial;
     
-    // Skip if too small (not worth ANE overhead)
-    if (in_ch * out_ch * spatial < 64 * 1024) {
-        return false;  // < 64K elements, CPU is faster
-    }
-    
-    // Skip if too large for ANE SRAM (~32MB working set)
-    // Use padded spatial for working set calculation
-    size_t working_set = in_ch * out_ch * 2 + in_ch * spatial_padded * 2 + out_ch * spatial_padded * 2;
-    if (working_set > 64 * 1024 * 1024) {  // 64MB limit (allow some spill)
-        GGML_ANE_LOG_DEBUG("MUL_MAT too large for ANE: %zu MB working set", working_set / (1024 * 1024));
-        return false;
-    }
+    // Note: Size checks removed - ANE can handle all sizes now
+    // Small matrices have some overhead but work fine
+    // Large matrices use unified memory, not limited to SRAM
     
     // Check if we have a cached kernel for these dimensions
     // Use padded spatial for hash to ensure cache hit

@@ -303,6 +303,16 @@ llama_context::llama_context(
         }
 
         LLAMA_LOG_DEBUG("%s: backend_ptrs.size() = %zu\n", __func__, backend_ptrs.size());
+        
+        // DEBUG: Log all backends in the scheduler
+        fprintf(stderr, "[DEBUG] Scheduler backends (%zu total):\n", backend_ptrs.size());
+        for (size_t i = 0; i < backend_ptrs.size(); i++) {
+            ggml_backend_t backend = backend_ptrs[i];
+            const char * name = ggml_backend_name(backend);
+            ggml_backend_dev_t dev = ggml_backend_get_device(backend);
+            const char * dev_name = dev ? ggml_backend_dev_name(dev) : "no device";
+            fprintf(stderr, "[DEBUG]   Backend %zu: %s (device: %s)\n", i, name, dev_name);
+        }
 
         // TODO: move these checks to ggml_backend_sched
         // enabling pipeline parallelism in the scheduler increases memory usage, so it is only done when necessary

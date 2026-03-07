@@ -82,6 +82,15 @@ static void ggml_backend_ane_buffer_set_tensor(ggml_backend_buffer_t buffer, str
         char * base_ptr = (char *)ctx->base;
         char * tensor_ptr = (char *)tensor->data;
         size_t buffer_offset = tensor_ptr - base_ptr;
+        
+        // DEBUG: Log when set_tensor is called
+        static int call_count = 0;
+        if (call_count < 5 || size > 10000) {
+            fprintf(stderr, "[ANE BUFFER] set_tensor: tensor=%s, size=%zu, offset=%zu, buffer_offset=%zu\n",
+                    tensor->name, size, offset, buffer_offset);
+            call_count++;
+        }
+        
         memcpy(base_ptr + buffer_offset + offset, data, size);
     }
 }
@@ -155,6 +164,8 @@ static ggml_backend_buffer_t ggml_backend_ane_buffer_type_alloc_buffer(ggml_back
         ctx->allocated_size = aligned_size;
         ctx->surface = nullptr;  // No IOSurface, using unified memory
         ctx->owns_memory = true; // We allocated this memory
+        
+        fprintf(stderr, "[ANE BUFFER] Allocated buffer: %zu bytes at %p (unified memory)\n", size, base);
         
         // Create buffer
         ggml_backend_buffer_t buffer = ggml_backend_buffer_init(buft, ggml_backend_ane_buffer_interface, ctx, size);

@@ -316,6 +316,9 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     // Use padded spatial for hash to ensure cache hit
     uint64_t hash = hash_matmul_dims(in_ch, out_ch, spatial_padded);
     
+    fprintf(stderr, "[ANE] MUL_MAT: in_ch=%ld, out_ch=%ld, spatial=%ld (padded=%ld, hash=0x%lx)\n",
+            in_ch, out_ch, spatial, spatial_padded, hash);
+    
     ggml_ane_kernel_t kernel = nullptr;
     {
         std::lock_guard<std::mutex> lock(g_matmul_kernels_mutex);
@@ -329,6 +332,8 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     if (!kernel) {
         GGML_ANE_LOG_INFO("[ANE] Compiling kernel for MUL_MAT: in_ch=%ld, out_ch=%ld, spatial=%ld (padded=%ld)", 
                           in_ch, out_ch, spatial, spatial_padded);
+        fprintf(stderr, "[ANE] Compiling NEW kernel: hash=0x%lx, in_ch=%ld, out_ch=%ld, spatial_padded=%ld\n",
+                hash, in_ch, out_ch, spatial_padded);
         
         // Generate MIL for conv-based matmul with padded spatial
         NSString * mil = ggml_ane_gen_mil_conv(in_ch, out_ch, spatial_padded);

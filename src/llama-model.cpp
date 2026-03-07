@@ -2709,6 +2709,15 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
         buft_list_t buft_list = make_gpu_buft_list(dev, split_mode, tensor_split);
         // add CPU buffer types as a fallback
         buft_list.insert(buft_list.end(), pimpl->cpu_buft_list.begin(), pimpl->cpu_buft_list.end());
+        
+        // DEBUG: Log the buffer types for this device
+        fprintf(stderr, "[DEBUG] GPU buft_list for device %s (%zu items):\n", 
+                ggml_backend_dev_name(dev), buft_list.size());
+        for (const auto & item : buft_list) {
+            fprintf(stderr, "[DEBUG]   - dev=%s, buft=%s\n", 
+                    ggml_backend_dev_name(item.first), ggml_backend_buft_name(item.second));
+        }
+        
         pimpl->gpu_buft_list.emplace(dev, std::move(buft_list));
     }
 

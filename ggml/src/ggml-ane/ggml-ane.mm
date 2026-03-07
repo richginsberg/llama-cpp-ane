@@ -329,8 +329,15 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     // Each MUL_MAT has different weights, so we can't share kernels by dimensions alone
     uint64_t hash = hash_matmul_dims(in_ch, out_ch, spatial_padded) ^ ((uint64_t)src0 >> 8);
     
-    fprintf(stderr, "[ANE] MUL_MAT: in_ch=%ld, out_ch=%ld, spatial=%ld (padded=%ld, hash=0x%lx, src0=%p)\n",
-            in_ch, out_ch, spatial, spatial_padded, hash, src0);
+    // Check if weights are in a buffer we can access
+    fprintf(stderr, "[ANE] MUL_MAT: in_ch=%ld, out_ch=%ld, spatial=%ld (hash=0x%lx)\n",
+            in_ch, out_ch, spatial, hash);
+    fprintf(stderr, "[ANE]   src0->data=%p, src0->buffer=%p, src0->buffer->context=%p\n",
+            src0->data, src0->buffer, src0->buffer ? src0->buffer->context : nullptr);
+    if (src0->buffer) {
+        fprintf(stderr, "[ANE]   buffer name: %s, usage: %d\n",
+                ggml_backend_buffer_name(src0->buffer), src0->buffer->usage);
+    }
     
     ggml_ane_kernel_t kernel = nullptr;
     {

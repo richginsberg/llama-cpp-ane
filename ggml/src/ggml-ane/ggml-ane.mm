@@ -456,7 +456,10 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     bool success = ggml_ane_execute(kernel, inputs, outputs);
     
     if (!success) {
-        GGML_ANE_LOG_ERROR("ANE execution failed for MUL_MAT");
+        fprintf(stderr, "[ANE ERROR] ANE execution failed for MUL_MAT %ldx%ldx%ld (padded=%ld)\n", 
+                in_ch, out_ch, spatial, spatial_padded);
+        fprintf(stderr, "[ANE ERROR] Kernel hash: %lu, input_size: %zu, output_size: %zu\n",
+                hash, in_ch * spatial_padded * sizeof(float), out_ch * spatial_padded * sizeof(float));
         free(input_conv);
         free(output_conv);
         return false;

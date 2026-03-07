@@ -208,8 +208,16 @@ static bool ggml_backend_ane_device_offload_op(ggml_backend_dev_t dev, const str
     if (op->op == GGML_OP_MUL_MAT) {
         const int64_t ne0 = op->src[0]->ne[0];
         const int64_t ne1 = op->src[0]->ne[1];
+        const int64_t M = op->src[1]->ne[1];  // Batch size / spatial dimension
         
-        fprintf(stderr, "[ANE] offload_op check: MUL_MAT ne0=%ld, ne1=%ld, size=%ld\n", ne0, ne1, ne0*ne1);
+        fprintf(stderr, "[ANE] offload_op check: MUL_MAT ne0=%ld, ne1=%ld, M=%ld\n", ne0, ne1, M);
+        
+        // ANE compiler fails for small spatial dimensions (M<8)
+        // These should go to CPU/Metal instead
+        if (M < 8) {
+            fprintf(stderr, "[ANE] offload_op: REJECTED (M=%ld < 8, ANE compiler limitation)\n", M);
+            return false;
+        }
         
         // Too small = not worth the dispatch overhead
         if (ne0 * ne1 < 256 * 256) {

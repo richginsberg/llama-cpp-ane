@@ -627,7 +627,11 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
                 GGML_ANE_LOG_ERROR("ANE: Unexpected op %s (%d) in execution phase", 
                                    op_name ? op_name : "unknown", node->op);
                 return GGML_STATUS_FAILED;
-        }
+            
+            case GGML_OP_UNARY:
+                GGML_ANE_LOG_DEBUG(" %s %d: supported (CPU execution)", op_name ? op_name : "unknown", i);
+                supported_ops++;
+                break;
     }
     
     GGML_ANE_LOG_INFO("ANE: graph compute complete");

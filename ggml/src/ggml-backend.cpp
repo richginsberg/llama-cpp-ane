@@ -1459,6 +1459,10 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
         struct ggml_backend_sched_split * split = &splits[split_id];
         int split_backend_id = split->backend_id;
         ggml_backend_t split_backend = sched->backends[split_backend_id];
+        
+        // DEBUG: Log which backend is executing each split
+        fprintf(stderr, "[SCHED] Executing split %d on backend %d (%s), graph has %d nodes\n", 
+                split_id, split_backend_id, ggml_backend_name(split_backend), split->graph.n_nodes);
 
         // copy the input tensors to the split backend
         for (int input_id = 0; input_id < split->n_inputs; input_id++) {
@@ -1584,7 +1588,10 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
         }
 
         if (!sched->callback_eval) {
+            fprintf(stderr, "[SCHED] Calling graph_compute on backend %d (%s) with %d nodes\n", 
+                    split_backend_id, ggml_backend_name(split_backend), split->graph.n_nodes);
             enum ggml_status ec = ggml_backend_graph_compute_async(split_backend, &split->graph);
+            fprintf(stderr, "[SCHED] graph_compute returned %d\n", ec);
             if (ec != GGML_STATUS_SUCCESS) {
                 return ec;
             }

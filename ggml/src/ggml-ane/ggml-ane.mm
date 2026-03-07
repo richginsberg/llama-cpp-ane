@@ -325,10 +325,12 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     
     // Check if we have a cached kernel for these dimensions
     // Use padded spatial for hash to ensure cache hit
-    uint64_t hash = hash_matmul_dims(in_ch, out_ch, spatial_padded);
+    // IMPORTANT: Include src0 pointer in hash to avoid reusing kernels with wrong weights!
+    // Each MUL_MAT has different weights, so we can't share kernels by dimensions alone
+    uint64_t hash = hash_matmul_dims(in_ch, out_ch, spatial_padded) ^ ((uint64_t)src0 >> 8);
     
-    fprintf(stderr, "[ANE] MUL_MAT: in_ch=%ld, out_ch=%ld, spatial=%ld (padded=%ld, hash=0x%lx)\n",
-            in_ch, out_ch, spatial, spatial_padded, hash);
+    fprintf(stderr, "[ANE] MUL_MAT: in_ch=%ld, out_ch=%ld, spatial=%ld (padded=%ld, hash=0x%lx, src0=%p)\n",
+            in_ch, out_ch, spatial, spatial_padded, hash, src0);
     
     ggml_ane_kernel_t kernel = nullptr;
     {

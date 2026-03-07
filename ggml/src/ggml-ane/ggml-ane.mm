@@ -510,20 +510,20 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
             
             // Check why we might not support it
             if (!node->src[0] || !node->src[1]) {
-                GGML_ANE_LOG_DEBUG("  MUL_MAT %d: missing src tensors", i);
+                fprintf(stderr, "[ANE] REJECT MUL_MAT %d: missing src tensors\n", i);
                 unsupported_ops++;
                 continue;
             }
             
             // Check if quantized (ANE only supports FP16/FP32)
             if (node->src[0]->type != GGML_TYPE_F32 && node->src[0]->type != GGML_TYPE_F16) {
-                GGML_ANE_LOG_DEBUG("  MUL_MAT %d: quantized weights (type=%d), skipping", i, node->src[0]->type);
+                fprintf(stderr, "[ANE] REJECT MUL_MAT %d: quantized weights (type=%d)\n", i, node->src[0]->type);
                 unsupported_ops++;
                 continue;
             }
             
             if (node->src[1]->type != GGML_TYPE_F32 && node->src[1]->type != GGML_TYPE_F16) {
-                GGML_ANE_LOG_DEBUG("  MUL_MAT %d: quantized input (type=%d), skipping", i, node->src[1]->type);
+                fprintf(stderr, "[ANE] REJECT MUL_MAT %d: quantized input (type=%d)\n", i, node->src[1]->type);
                 unsupported_ops++;
                 continue;
             }
@@ -534,7 +534,7 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
             
             // Skip small matrices
             if (ne0 * ne1 * M < 64 * 1024) {
-                GGML_ANE_LOG_DEBUG("  MUL_MAT %d: too small (%ldx%ldx%ld), CPU faster", i, ne0, ne1, M);
+                fprintf(stderr, "[ANE] REJECT MUL_MAT %d: too small (%ldx%ldx%ld = %ld elements)\n", i, ne0, ne1, M, ne0*ne1*M);
                 unsupported_ops++;
                 continue;
             }
@@ -542,7 +542,7 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
             // Check SRAM limit
             size_t working_set = ne0 * ne1 * 2 + ne0 * M * 2 + ne1 * M * 2;
             if (working_set > 64 * 1024 * 1024) {
-                GGML_ANE_LOG_DEBUG("  MUL_MAT %d: too large (%zu MB)", i, working_set / (1024 * 1024));
+                fprintf(stderr, "[ANE] REJECT MUL_MAT %d: too large (%zu MB)\n", i, working_set / (1024 * 1024));
                 unsupported_ops++;
                 continue;
             }

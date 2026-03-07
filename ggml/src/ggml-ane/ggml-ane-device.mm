@@ -147,6 +147,14 @@ static bool ggml_backend_ane_device_supports_op(ggml_backend_dev_t dev, const st
                 fprintf(stderr, "[ANE] supports_op: MUL_MAT REJECTED (quantized input)\n");
                 return false;
             }
+            // ANE compiler fails for small spatial dimensions (M<8)
+            if (op->src[1]) {
+                const int64_t M = op->src[1]->ne[1];  // Batch size / spatial dimension
+                if (M < 8) {
+                    fprintf(stderr, "[ANE] supports_op: MUL_MAT REJECTED (M=%ld < 8, ANE compiler limitation)\n", M);
+                    return false;
+                }
+            }
             fprintf(stderr, "[ANE] supports_op: MUL_MAT ACCEPTED\n");
             return true;
             

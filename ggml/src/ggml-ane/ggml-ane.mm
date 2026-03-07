@@ -539,9 +539,10 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
                 continue;
             }
             
-            // Check SRAM limit
-            size_t working_set = ne0 * ne1 * 2 + ne0 * M * 2 + ne1 * M * 2;
-            if (working_set > 64 * 1024 * 1024) {
+            // Check SRAM limit - ANE has access to unified memory, not just SRAM
+            // The weights are already in unified memory, so we only need space for input/output
+            size_t working_set = ne0 * M * 2 + ne1 * M * 2;  // Just input + output, not weights
+            if (working_set > 512 * 1024 * 1024) {  // 512 MB limit for input/output buffers
                 fprintf(stderr, "[ANE] REJECT MUL_MAT %d: too large (%zu MB)\n", i, working_set / (1024 * 1024));
                 unsupported_ops++;
                 continue;

@@ -373,6 +373,11 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
         const float * weights = nullptr;
         
         // Handle FP16 and FP32 weights
+        // NOTE: There's a known issue with FP16-to-FP32 conversion and data type mismatches
+        // when using mmap with GGUF files on ANE, weights read as FP16 but ANE expects FP32
+        // This causes incorrect ANE execution and gibberish output
+        // Proper fix would require modifying model loader or ANE backend to handle FP32 weights directly
+        // For now, we're logging to document the issue
         if (src0->type == GGML_TYPE_F16) {
             const ggml_fp16_t * weights_f16 = (const ggml_fp16_t *)src0->data;
             

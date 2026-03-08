@@ -325,19 +325,24 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     
     // Check if we have a cached kernel for these dimensions
     // Use padded spatial for hash to ensure cache hit
-    // IMPORTANT: Include src0 pointer in hash to avoid reusing kernels with wrong weights!
-    // Each MUL_MAT has different weights, so we can't share kernels by dimensions alone
-    uint64_t hash = hash_matmul_dims(in_ch, out_ch, spatial_padded) ^ ((uint64_t)src0 >> 8);
-    
-    // Check if weights are in a buffer we can access
-    fprintf(stderr, "[ANE] MUL_MAT: in_ch=%ld, out_ch=%ld, spatial=%ld (hash=0x%lx)\n",
-            in_ch, out_ch, spatial, hash);
-    fprintf(stderr, "[ANE]   src0->data=%p, src0->buffer=%p, src0->buffer->context=%p\n",
-            src0->data, src0->buffer, src0->buffer ? src0->buffer->context : nullptr);
-    if (src0->buffer) {
-        fprintf(stderr, "[ANE]   buffer name: %s, usage: %d\n",
-                ggml_backend_buffer_name(src0->buffer), src0->buffer->usage);
+    // IMPORTANT: Use tensor NAME instead of pointer for stable caching!
+    // The same weight tensor should reuse its kernel across forward passes
+    uint64_t tensor_hash = 0;
+    if (src0->name) {
+        // Hash the tensor name for stable caching
+        const char * name = src0->name;
+        while (*name) {
+            tensor_hash = tensor_hash * 31 + *name;
+            name++;
+        }
+    } else {
+        // Fallback to pointer if no name (shouldn't happen for weights)
+        tensor_hash = (uint64_t)src0;
     }
+    uint64_t hash = hash_matmul_dims(in_ch, out_ch, spatial_padded) ^ (tensor_hash << 8);
+    
+    fprintf(stderr, "[ANE] MUL_MAT: in_ch=%ld, out_ch=%ld, spatial=%ld (hash=0x%lx, name=%s)\n",
+            in_ch, out_ch, spatial, hash, src0->name ? src0->name : "unnamed");
     
     ggml_ane_kernel_t kernel = nullptr;
     {

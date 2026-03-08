@@ -7773,9 +7773,16 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
         ggml_backend_dev_get_props(dev, &props);
         bool buffer_from_host_ptr_supported = props.caps.buffer_from_host_ptr;
         bool is_default_buft = buft == ggml_backend_dev_buffer_type(dev);
+        
+        fprintf(stderr, "[MODEL LOADER] Checking buffer_from_host_ptr conditions:\n");
+        fprintf(stderr, "[MODEL LOADER]   buft=%s, dev=%s\n", ggml_backend_buft_name(buft), ggml_backend_dev_name(dev));
+        fprintf(stderr, "[MODEL LOADER]   use_mmap=%d, use_mmap_buffer=%d, buffer_from_host_ptr_supported=%d, is_default_buft=%d\n",
+                ml.use_mmap, use_mmap_buffer, buffer_from_host_ptr_supported, is_default_buft);
+        fprintf(stderr, "[MODEL LOADER]   buft=%p, dev_buffer_type=%p\n", buft, ggml_backend_dev_buffer_type(dev));
 
         std::vector<ggml_backend_buffer_ptr> bufs;
         if (ml.use_mmap && use_mmap_buffer && buffer_from_host_ptr_supported && is_default_buft) {
+            fprintf(stderr, "[MODEL LOADER] Using buffer_from_host_ptr to wrap mmap'd memory!\n");
             GGML_ASSERT(!ml.no_alloc);
             for (uint32_t idx = 0; idx < ml.files.size(); idx++) {
                 // only the mmap region containing the tensors in the model is mapped to the backend buffer

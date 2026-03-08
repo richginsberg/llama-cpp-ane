@@ -379,14 +379,13 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
             const ggml_fp16_t * weights_f16 = (const ggml_fp16_t *)src0->data;
             
             // Check if pointer is valid and data is accessible
-            fprintf(stderr, "[ANE] Reading weights: src0->data=%p, type=F16, count=%ld, buffer=%p\n",
-                    src0->data, out_ch * in_ch, src0->buffer);
+            fprintf(stderr, "[ANE] Reading weights: src0->data=%p, type=F16, count=%lld, buffer=%p\n",
+                    src0->data, (long long)(out_ch * in_ch), src0->buffer);
             
             // Check if buffer is ANE buffer or CPU buffer
             if (src0->buffer) {
-                fprintf(stderr, "[ANE] Buffer type: %s, name: %s\n", 
-                        ggml_backend_buffer_name(src0->buffer),
-                        ggml_backend_buffer_type_name(ggml_backend_buffer_get_type(src0->buffer)));
+                fprintf(stderr, "[ANE] Buffer name: %s\n", 
+                        ggml_backend_buffer_name(src0->buffer));
             }
             
             // Try to read first few values to verify access
@@ -418,14 +417,13 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
             const float * weights_f32 = (const float *)src0->data;
             
             // Check if pointer is valid and data is accessible
-            fprintf(stderr, "[ANE] Reading weights: src0->data=%p, type=F32, count=%ld, buffer=%p\n",
-                    src0->data, out_ch * in_ch, src0->buffer);
+            fprintf(stderr, "[ANE] Reading weights: src0->data=%p, type=F32, count=%lld, buffer=%p\n",
+                    src0->data, (long long)(out_ch * in_ch), src0->buffer);
             
             // Check if buffer is ANE buffer or CPU buffer
             if (src0->buffer) {
-                fprintf(stderr, "[ANE] Buffer type: %s, name: %s\n", 
-                        ggml_backend_buffer_name(src0->buffer),
-                        ggml_backend_buffer_type_name(ggml_backend_buffer_get_type(src0->buffer)));
+                fprintf(stderr, "[ANE] Buffer name: %s\n", 
+                        ggml_backend_buffer_name(src0->buffer));
             }
             
             // Try to read first few values to verify access

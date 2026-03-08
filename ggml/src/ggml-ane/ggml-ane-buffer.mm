@@ -139,7 +139,8 @@ static const char * ggml_backend_ane_buffer_type_get_name(ggml_backend_buffer_ty
 }
 
 static ggml_backend_buffer_t ggml_backend_ane_buffer_type_alloc_buffer(ggml_backend_buffer_type_t buft, size_t size) {
-    fprintf(stderr, "[ANE] alloc_buffer called: %zu bytes\n", size);
+    fprintf(stderr, "[ANE BUFFER] alloc_buffer called: %zu bytes (%.2f MB)\n", size, size / (1024.0 * 1024.0));
+    fprintf(stderr, "[ANE BUFFER] WARNING: This allocates EMPTY memory! Model loader should use buffer_from_host_ptr instead!\n");
     
 #ifdef __APPLE__
     @autoreleasepool {

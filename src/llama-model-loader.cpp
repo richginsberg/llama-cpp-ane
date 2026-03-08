@@ -765,6 +765,8 @@ llama_model_loader::llama_model_loader(
     this->use_direct_io = use_direct_io;
     this->check_tensors = check_tensors;
     this->no_alloc = no_alloc;
+    
+    fprintf(stderr, "[MODEL LOADER CONSTRUCTOR] Set use_mmap = %d, use_direct_io = %d\n", use_mmap, use_direct_io);
 }
 
 std::string llama_model_loader::get_arch_name() const {

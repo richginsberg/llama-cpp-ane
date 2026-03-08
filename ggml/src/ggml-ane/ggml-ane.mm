@@ -373,15 +373,12 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
         const float * weights = nullptr;
         
         // Handle FP16 and FP32 weights
-        // NOTE: There's a known issue with FP16-to-FP32 conversion and data type mismatches
-        // when using mmap with GGUF files on ANE, weights read as FP16 but ANE expects FP32
-        // This causes incorrect ANE execution and gibberish output
-        // Proper fix would require modifying model loader or ANE backend to handle FP32 weights directly
-        // For now, we're logging to document the issue
+        // NOTE: Investigating why ANE produces gibberish even with FP32 weights
+        // Issue appears to be with weight access from mmap'd GGUF file
         if (src0->type == GGML_TYPE_F16) {
             const ggml_fp16_t * weights_f16 = (const ggml_fp16_t *)src0->data;
             
-            // Check if the pointer is valid and data is accessible
+            // Check if pointer is valid and data is accessible
             fprintf(stderr, "[ANE] Reading weights: src0->data=%p, type=F16, count=%ld\n",
                     src0->data, out_ch * in_ch);
             
@@ -390,7 +387,7 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
             for (int64_t i = 0; i < std::min(out_ch * in_ch, (int64_t)10); i++) {
                 test_sum += ggml_fp16_to_fp32(weights_f16[i]);
             }
-            fprintf(stderr, "[ANE] Weight access test: sum=%.4f (first 10 values)\n", test_sum);
+            fprintf(stderr, "[ANE] Weight access test (F16): sum=%.4f (first 10 values)\n", test_sum);
             
             if (src0_transposed) {
                 // Already [N, K] = [out_ch, in_ch], just convert to FP32
@@ -412,6 +409,17 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
         } else {
             // FP32 weights
             const float * weights_f32 = (const float *)src0->data;
+            
+            // Check if pointer is valid and data is accessible
+            fprintf(stderr, "[ANE] Reading weights: src0->data=%p, type=F32, count=%ld\n",
+                    src0->data, out_ch * in_ch);
+            
+            // Try to read first few values to verify access
+            float test_sum = 0.0f;
+            for (int64_t i = 0; i < std::min(out_ch * in_ch, (int64_t)10); i++) {
+                test_sum += weights_f32[i];
+            }
+            fprintf(stderr, "[ANE] Weight access test (F32): sum=%.4f (first 10 values)\n", test_sum);
             
             if (src0_transposed) {
                 // Already [N, K] = [out_ch, in_ch], use directly

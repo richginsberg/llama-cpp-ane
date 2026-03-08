@@ -291,8 +291,11 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
         // Check if transposed makes sense
         if (src0->ne[1] == src1->ne[0]) {
             src0_transposed = true;
-            fprintf(stderr, "[ANE] src0 is transposed: [%ld,%ld] means [%ld,%ld] in row-major\n",
-                    src0->ne[0], src0->ne[1], N, K);
+            fprintf(stderr, "[ANE] DETECTED TRANSPOSE: src0=[%ld,%ld] should be [%ld,%ld], src1=[%ld,%ld]\n",
+                    src0->ne[0], src0->ne[1], src0->ne[1], src0->ne[0], src1->ne[0], src1->ne[1]);
+        } else {
+            fprintf(stderr, "[ANE] DIMENSION MISMATCH: src0=[%ld,%ld], src1=[%ld,%ld] - cannot determine transpose\n",
+                    src0->ne[0], src0->ne[1], src1->ne[0], src1->ne[1]);
         }
     }
     

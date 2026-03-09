@@ -7761,9 +7761,8 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
     for (auto & [buft, ctx_ptr] : ctx_map) {
         ggml_context * ctx = ctx_ptr.get();
         
-        fprintf(stderr, "[MODEL LOADER] Processing context for buft=%s (device=%s)\n",
-                ggml_backend_buft_name(buft),
-                buft->device ? ggml_backend_dev_name(buft->device) : "NULL");
+        fprintf(stderr, "[MODEL LOADER] Processing context for buft=%s\n",
+                ggml_backend_buft_name(buft));
 
         // skip contexts without tensors
         if (ggml_get_first_tensor(ctx) == nullptr) {

@@ -2982,8 +2982,7 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
             }
 
             if (buft != buft_list->front().second) {
-                fprintf(stderr, "[DEBUG] select_weight_buft: tensor=%s, selected buft=%s (from list, %s)\n", 
-                        n_moved_tensors++;
+                n_moved_tensors++;
                 if (!first_moved_tensor) {
                     first_moved_tensor = t_meta;
                     first_moved_from_buft = buft_list->front().second;

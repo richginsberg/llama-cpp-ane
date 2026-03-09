@@ -2807,7 +2807,8 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
     auto ctx_for_buft = [&](ggml_backend_buffer_type_t buft) -> ggml_context * {
         auto it = ctx_map.find(buft);
         if (it == ctx_map.end()) {
-            fprintf(stderr, "[MODEL LOADER] Creating NEW context for buft=%s\n", ggml_backend_buft_name(buft));
+            fprintf(stderr, "[MODEL LOADER] Creating NEW context for buft=%s (ctx_map size before: %zu)\n", 
+                    ggml_backend_buft_name(buft), ctx_map.size());
             ggml_init_params params = {
                 /*.mem_size   =*/ ctx_size,
                 /*.mem_buffer =*/ NULL,
@@ -2823,6 +2824,7 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
 
             return ctx;
         }
+        fprintf(stderr, "[MODEL LOADER] Found existing context for buft=%s\n", ggml_backend_buft_name(buft));
         return it->second.get();
     };
 

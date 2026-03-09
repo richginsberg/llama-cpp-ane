@@ -7805,11 +7805,17 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
                 void * addr = nullptr;
                 size_t first, last; // NOLINT
                 ml.get_mapping_range(&first, &last, &addr, idx, ctx);
+                fprintf(stderr, "[MODEL LOADER] get_mapping_range: idx=%d, first=%zu, last=%zu, addr=%p (buft=%s)\n",
+                        idx, first, last, addr, ggml_backend_buft_name(buft));
                 if (first >= last) {
+                    fprintf(stderr, "[MODEL LOADER] SKIPPING buffer_from_host_ptr - invalid range (first >= last)\n");
                     continue;
                 }
                 const size_t max_size = ggml_get_max_tensor_size(ctx);
+                fprintf(stderr, "[MODEL LOADER] CALLING buffer_from_host_ptr: dev=%s, size=%.2f MB, max_size=%zu\n",
+                        ggml_backend_dev_name(dev), (last - first) / (1024.0 * 1024.0), max_size);
                 ggml_backend_buffer_t buf = ggml_backend_dev_buffer_from_host_ptr(dev, (char *) addr + first, last - first, max_size);
+                fprintf(stderr, "[MODEL LOADER] buffer_from_host_ptr returned: buf=%p\n", buf);
                 if (buf == nullptr) {
                     throw std::runtime_error(format("unable to allocate %s buffer", ggml_backend_buft_name(buft)));
                 }

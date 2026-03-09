@@ -7784,7 +7784,7 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
 
         std::vector<ggml_backend_buffer_ptr> bufs;
         if (ml.use_mmap && use_mmap_buffer && buffer_from_host_ptr_supported && is_default_buft) {
-            fprintf(stderr, "[MODEL LOADER] Using buffer_from_host_ptr to wrap mmap'd memory!\n");
+            fprintf(stderr, "[MODEL LOADER] Using buffer_from_host_ptr to wrap mmap'd memory! (ml.no_alloc=%d)\n", ml.no_alloc);
             GGML_ASSERT(!ml.no_alloc);
             for (uint32_t idx = 0; idx < ml.files.size(); idx++) {
                 // only the mmap region containing the tensors in the model is mapped to the backend buffer
@@ -7806,8 +7806,10 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
                 buf_map.emplace(idx, buf);
             }
         } else {
+            fprintf(stderr, "[MODEL LOADER] NOT using buffer_from_host_ptr, using alloc_buffer (ml.no_alloc=%d)\n", ml.no_alloc);
             ggml_backend_buffer_t buf;
             if (ml.no_alloc) {
+                fprintf(stderr, "[MODEL LOADER] Creating DUMMY buffer (size=0) because no_alloc=true\n");
                 buf = ggml_backend_buft_alloc_buffer(buft, /*size =*/ 0); // dummy buffer
                 for (ggml_tensor * t = ggml_get_first_tensor(ctx); t != nullptr; t = ggml_get_next_tensor(ctx, t)) {
                     t->buffer = buf; // set dummy buffer for weights so that the backend scheduler won't try to allocate them

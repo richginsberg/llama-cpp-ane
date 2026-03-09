@@ -2971,11 +2971,20 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
                 if (!buft) {
                     throw std::runtime_error(format("failed to find a compatible buffer type for tensor %s", tn.str().c_str()));
                 }
+                fprintf(stderr, "[MODEL LOADER] select_weight_buft returned: buft=%s for tensor=%s (use_mmap=%d)\n",
+                        ggml_backend_buft_name(buft), tn.str().c_str(), ml.use_mmap);
             }
 
             // avoid using a host buffer when using mmap
             auto * buft_dev = ggml_backend_buft_get_device(buft);
-            if (ml.use_mmap && buft_dev && buft == ggml_backend_dev_host_buffer_type(buft_dev)) {
+            auto * host_buft = buft_dev ? ggml_backend_dev_host_buffer_type(buft_dev) : nullptr;
+            fprintf(stderr, "[MODEL LOADER] Host buffer check: buft=%s, buft_dev=%s, host_buft=%s, match=%d\n",
+                    ggml_backend_buft_name(buft),
+                    buft_dev ? ggml_backend_dev_name(buft_dev) : "NULL",
+                    host_buft ? ggml_backend_buft_name(host_buft) : "NULL",
+                    buft == host_buft);
+            if (ml.use_mmap && buft_dev && buft == host_buft) {
+                fprintf(stderr, "[MODEL LOADER] SWITCHING to CPU because ANE is a host buffer with use_mmap=true\n");
                 auto * cpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
                 if (!cpu_dev) {
                     throw std::runtime_error("no CPU backend found");

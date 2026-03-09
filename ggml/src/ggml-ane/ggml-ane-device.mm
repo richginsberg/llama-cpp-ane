@@ -94,9 +94,10 @@ static ggml_backend_buffer_type_t ggml_backend_ane_device_get_buffer_type(ggml_b
 }
 
 static ggml_backend_buffer_type_t ggml_backend_ane_device_get_host_buffer_type(ggml_backend_dev_t dev) {
-    // ANE uses unified memory, so we the a host buffer type for wrapping mmap'd memory
-    // This allows the model loader to use buffer_from_host_ptr for ANE
-    return ggml_backend_ane_buffer_type();
+    // Return nullptr to avoid being treated as a host buffer by the model loader.
+    // The model loader switches host buffers to CPU when use_mmap=true, which we don't want.
+    // ANE can still use buffer_from_host_ptr via the device interface directly.
+    return nullptr;
     GGML_UNUSED(dev);
 }
 

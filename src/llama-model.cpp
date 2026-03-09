@@ -7749,9 +7749,10 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
             ctx_map.size(), ml.use_mmap, ml.no_alloc);
     for (const auto & [buft, ctx_ptr] : ctx_map) {
         ggml_context * ctx = ctx_ptr.get();
-        size_t n_tensors = ctx ? ggml_get_n_tensors(ctx) : 0;
-        fprintf(stderr, "[MODEL LOADER]   - buft=%s, n_tensors=%zu\n", 
-                ggml_backend_buft_name(buft), n_tensors);
+        ggml_tensor * first_tensor = ctx ? ggml_get_first_tensor(ctx) : nullptr;
+        fprintf(stderr, "[MODEL LOADER]   - buft=%s, first_tensor=%s\n", 
+                ggml_backend_buft_name(buft),
+                first_tensor ? ggml_get_name(first_tensor) : "none");
     }
 
     // create the backend buffers

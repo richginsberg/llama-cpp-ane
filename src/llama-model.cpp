@@ -7766,9 +7766,14 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
 
         // skip contexts without tensors
         if (ggml_get_first_tensor(ctx) == nullptr) {
-            fprintf(stderr, "[MODEL LOADER] Skipping context - no tensors\n");
+            fprintf(stderr, "[MODEL LOADER] Skipping context for buft=%s - no tensors\n",
+                    ggml_backend_buft_name(buft));
             continue;
         }
+        
+        fprintf(stderr, "[MODEL LOADER] Context for buft=%s has tensors (first: %s)\n",
+                ggml_backend_buft_name(buft),
+                ggml_get_first_tensor(ctx) ? ggml_get_name(ggml_get_first_tensor(ctx)) : "none");
 
         llama_buf_map buf_map;
         buf_map.reserve(n_max_backend_buffer);

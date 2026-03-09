@@ -7745,9 +7745,13 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
     pimpl->mappings.reserve(ml.mappings.size());
 
     // DEBUG: Show what buffer types are in ctx_map
-    fprintf(stderr, "[MODEL LOADER] ctx_map contains %zu buffer types:\n", ctx_map.size());
+    fprintf(stderr, "[MODEL LOADER] ctx_map contains %zu buffer types (use_mmap=%d, no_alloc=%d):\n", 
+            ctx_map.size(), ml.use_mmap, ml.no_alloc);
     for (const auto & [buft, ctx_ptr] : ctx_map) {
-        fprintf(stderr, "[MODEL LOADER]   - buft=%s\n", ggml_backend_buft_name(buft));
+        ggml_context * ctx = ctx_ptr.get();
+        size_t n_tensors = ctx ? ggml_get_n_tensors(ctx) : 0;
+        fprintf(stderr, "[MODEL LOADER]   - buft=%s, n_tensors=%zu\n", 
+                ggml_backend_buft_name(buft), n_tensors);
     }
 
     // create the backend buffers

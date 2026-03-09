@@ -2807,6 +2807,7 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
     auto ctx_for_buft = [&](ggml_backend_buffer_type_t buft) -> ggml_context * {
         auto it = ctx_map.find(buft);
         if (it == ctx_map.end()) {
+            fprintf(stderr, "[MODEL LOADER] Creating NEW context for buft=%s\n", ggml_backend_buft_name(buft));
             ggml_init_params params = {
                 /*.mem_size   =*/ ctx_size,
                 /*.mem_buffer =*/ NULL,
@@ -7743,6 +7744,12 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
     ml.init_mappings(true, use_mlock ? &pimpl->mlock_mmaps : nullptr);
     pimpl->mappings.reserve(ml.mappings.size());
 
+    // DEBUG: Show what buffer types are in ctx_map
+    fprintf(stderr, "[MODEL LOADER] ctx_map contains %zu buffer types:\n", ctx_map.size());
+    for (const auto & [buft, ctx_ptr] : ctx_map) {
+        fprintf(stderr, "[MODEL LOADER]   - buft=%s\n", ggml_backend_buft_name(buft));
+    }
+
     // create the backend buffers
     std::vector<std::pair<ggml_context *, llama_buf_map>> ctx_buf_maps;
     ctx_buf_maps.reserve(ctx_map.size());
@@ -7753,9 +7760,14 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
 
     for (auto & [buft, ctx_ptr] : ctx_map) {
         ggml_context * ctx = ctx_ptr.get();
+        
+        fprintf(stderr, "[MODEL LOADER] Processing context for buft=%s (device=%s)\n",
+                ggml_backend_buft_name(buft),
+                buft->device ? ggml_backend_dev_name(buft->device) : "NULL");
 
         // skip contexts without tensors
         if (ggml_get_first_tensor(ctx) == nullptr) {
+            fprintf(stderr, "[MODEL LOADER] Skipping context - no tensors\n");
             continue;
         }
 

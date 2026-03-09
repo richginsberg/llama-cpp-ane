@@ -141,22 +141,13 @@ static const char * ggml_backend_ane_buffer_type_get_name(ggml_backend_buffer_ty
 static ggml_backend_buffer_t ggml_backend_ane_buffer_type_alloc_buffer(ggml_backend_buffer_type_t buft, size_t size) {
     fprintf(stderr, "[ANE BUFFER] alloc_buffer called: %zu bytes (%.2f MB)\n", size, size / (1024.0 * 1024.0));
     
-    // Print backtrace to see where this is being called from
-    fprintf(stderr, "[ANE BUFFER] Called from:\n");
-    void *callstack[128];
-    int frames = backtrace(callstack, 128);
-    char **strs = backtrace_symbols(callstack, frames);
-    for (int i = 0; i < frames && i < 10; ++i) {
-        fprintf(stderr, "[ANE BUFFER]   %d: %s\n", i, strs[i]);
-    }
-    free(strs);
-    
     if (size == 0) {
-        fprintf(stderr, "[ANE BUFFER] Creating EMPTY dummy buffer (size=0)\n");
+        fprintf(stderr, "[ANE BUFFER] Creating DUMMY buffer (size=0) - NO ALLOCATION!\n");
         // Return a minimal valid buffer for dummy use case
-        size = 1; // Minimum allocation
+        // This is used during temporary loads with no_alloc=true
+        size = 1; // Minimal allocation to avoid nullptr issues
     } else {
-        fprintf(stderr, "[ANE BUFFER] WARNING: This allocates EMPTY memory! Model loader should use buffer_from_host_ptr instead!\n");
+        fprintf(stderr, "[ANE BUFFER] WARNING: Allocating EMPTY memory (%zu bytes)! Model loader should use buffer_from_host_ptr instead!\n", size);
     }
     
 #ifdef __APPLE__

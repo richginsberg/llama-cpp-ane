@@ -2763,6 +2763,10 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
 
     const int i_gpu_start = std::max(int(hparams.n_layer) + 1 - n_gpu_layers, 0);
     const int act_gpu_layers = devices.empty() ? 0 : std::min(n_gpu_layers, int(n_layer) + 1);
+    
+    fprintf(stderr, "[DEBUG] GPU layer assignment: n_layer=%d, n_gpu_layers=%d, i_gpu_start=%d, act_gpu_layers=%d, devices.size=%zu (use_mmap=%d, no_alloc=%d)\n",
+            (int)hparams.n_layer, n_gpu_layers, i_gpu_start, act_gpu_layers, devices.size(), ml.use_mmap, ml.no_alloc);
+    
     auto get_layer_buft_list = [&](int il) -> llama_model::impl::layer_dev {
         const bool is_swa = il < int(hparams.n_layer) && hparams.is_swa(il);
         if (il < i_gpu_start || (il - i_gpu_start) >= act_gpu_layers) {

@@ -49,11 +49,11 @@ static const char * ggml_backend_ane_device_get_description(ggml_backend_dev_t d
 }
 
 static void ggml_backend_ane_device_get_memory(ggml_backend_dev_t dev, size_t * free, size_t * total) {
-    // Report limited memory to prevent llama.cpp from putting model weights on ANE
-    // ANE uses unified memory - weights should stay on Metal/CPU
-    // We only need enough for compute buffers (activations)
-    *total = 256 * 1024 * 1024;  // 256 MB
-    *free = 256 * 1024 * 1024;
+    // ANE uses unified memory - report sufficient memory for model weights
+    // The memory optimizer will assign layers to ANE based on this value
+    // Using 16 GB as a reasonable default for M2 Max
+    *total = 16ull * 1024 * 1024 * 1024;  // 16 GB
+    *free = 16ull * 1024 * 1024 * 1024;
     GGML_UNUSED(dev);
 }
 

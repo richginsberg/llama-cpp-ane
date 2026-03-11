@@ -602,7 +602,13 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
             continue;  // Skip placeholder nodes
         }
         
+        // Log each operation with its enum value
+        const char * op_name = ggml_op_name(node->op);
+        fprintf(stderr, "[ANE] Node %d: op=%s (enum=%d, GGML_OP_MUL_MAT=%d)\n", 
+                i, op_name ? op_name : "NULL", node->op, GGML_OP_MUL_MAT);
+        
         if (node->op == GGML_OP_MUL_MAT) {
+            fprintf(stderr, "[ANE] FOUND MUL_MAT at node %d!\n", i);
             mul_mat_ops++;
             
             // Check why we might not support it
@@ -688,8 +694,12 @@ static enum ggml_status ggml_backend_ane_graph_compute(ggml_backend_t backend, s
     for (int i = 0; i < cgraph->n_nodes; i++) {
         struct ggml_tensor * node = cgraph->nodes[i];
         
+        const char * op_name = ggml_op_name(node->op);
+        fprintf(stderr, "[ANE] Executing node %d: op=%s (enum=%d)\n", i, op_name ? op_name : "NULL", node->op);
+        
         switch (node->op) {
             case GGML_OP_MUL_MAT:
+                fprintf(stderr, "[ANE] EXECUTING MUL_MAT at node %d!\n", i);
                 if (!ggml_ane_exec_mul_mat(node)) {
                     GGML_ANE_LOG_ERROR("ANE: MUL_MAT execution failed");
                     return GGML_STATUS_FAILED;

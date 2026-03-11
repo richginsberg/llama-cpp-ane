@@ -312,12 +312,13 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     }
     spatial = M;
     
-    // ANE requires minimum spatial dimension of 16 AND must be a multiple of 16
-    // TEMPORARY: Removed constraint for testing - can ANE execute small/non-aligned spatial dimensions?
-    // Original constraint: spatial >= 16 && spatial % 16 == 0
-    const int64_t spatial_padded = spatial;
+    // ANE requires spatial dimensions to be multiples of 16 for reliable execution
+    // Pad spatial to next multiple of 16 if needed
+    const int64_t spatial_padded = ((spatial + 15) / 16) * 16;
     
-    fprintf(stderr, "[ANE] MUL_MAT: spatial=%ld (testing without constraints)\n", spatial);
+    if (spatial_padded != spatial) {
+        fprintf(stderr, "[ANE] MUL_MAT: padding spatial from %ld to %ld (next multiple of 16)\n", spatial, spatial_padded);
+    }
     
     // Note: Size checks removed - ANE can handle all sizes now
     // Small matrices have some overhead but work fine

@@ -44,6 +44,20 @@ static uint64_t hash_matmul_dims(int64_t m, int64_t n, int64_t k) {
     return ((uint64_t)m << 42) | ((uint64_t)n << 21) | (uint64_t)k;
 }
 
+// Clear kernel cache to free ANE resources
+// Call this at the start of each model load to avoid hitting ANE compile limits
+static void ggml_ane_clear_kernel_cache(void) {
+    std::lock_guard<std::mutex> lock(g_matmul_kernels_mutex);
+    fprintf(stderr, "[ANE] Clearing kernel cache: %zu kernels\n", g_matmul_kernels.size());
+    for (auto& pair : g_matmul_kernels) {
+        if (pair.second) {
+            // Free the ANE kernel
+            // Note: The kernel object is managed by ARC, so we just remove it from the map
+        }
+    }
+    g_matmul_kernels.clear();
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // GUID Definition
 ////////////////////////////////////////////////////////////////////////////////
@@ -326,8 +340,8 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
     
     // Check if we have a cached kernel for these dimensions
     // Use padded spatial for hash to ensure cache hit
-    // IMPORTANT: Use tensor NAME instead of pointer for stable caching!
-    // The same weight tensor should reuse its kernel across forward passes
+    // IMPORTANT: Use tensor NAME for hash since weights are baked into kernel!
+    // Each weight tensor needs its own kernel (ANE limitation)
     uint64_t tensor_hash = 0;
     if (src0->name) {
         // Hash the tensor name for stable caching
@@ -341,7 +355,7 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
         tensor_hash = (uint64_t)src0;
     }
     uint64_t hash = hash_matmul_dims(in_ch, out_ch, spatial_padded) ^ (tensor_hash << 8);
-    
+
     fprintf(stderr, "[ANE] MUL_MAT: in_ch=%ld, out_ch=%ld, spatial=%ld (hash=0x%lx, name=%s)\n",
             in_ch, out_ch, spatial, hash, src0->name ? src0->name : "unnamed");
     
@@ -838,6 +852,10 @@ static ggml_backend_i ggml_backend_ane_interface = {
 ////////////////////////////////////////////////////////////////////////////////
 
 ggml_backend_t ggml_backend_ane_init(void) {
+    // Clear kernel cache to avoid hitting ANE compile limits
+    // This is important for multiple model loads in the same process
+    ggml_ane_clear_kernel_cache();
+    
     if (!GGML_ANE_AVAILABLE) {
         GGML_ANE_LOG_WARN("ANE not available on this platform");
         return nullptr;

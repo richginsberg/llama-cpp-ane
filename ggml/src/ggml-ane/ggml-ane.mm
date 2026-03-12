@@ -369,9 +369,10 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
         
         // Auto-clear cache when approaching ANE compile limit
         // ANE has a hard limit of ~100 kernels per process
-        if (!kernel && g_matmul_kernels.size() >= 80) {
-            fprintf(stderr, "[ANE] Kernel cache at limit (%zu/100), auto-clearing to make room for new kernel\n", 
-                    g_matmul_kernels.size());
+        // Check actual compile count, not just cache size
+        if (!kernel && ggml_ane_get_compile_count() >= 80) {
+            fprintf(stderr, "[ANE] Approaching compile limit (%d/100), clearing cache to make room\n", 
+                    ggml_ane_get_compile_count());
             // Clear old kernels to make room
             g_matmul_kernels.clear();
             // Reset compile count to allow new compilations

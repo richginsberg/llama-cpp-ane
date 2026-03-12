@@ -94,6 +94,11 @@ int ggml_ane_get_compile_count(void) {
     return g_ane_compile_count;
 }
 
+void ggml_ane_reset_compile_count(void) {
+    g_ane_compile_count = 0;
+    GGML_ANE_LOG_INFO("ANE compile count reset to 0");
+}
+
 bool ggml_ane_needs_restart(void) {
     return g_ane_compile_count >= kMaxCompilesPerProcess;
 }

@@ -366,6 +366,17 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
         if (it != g_matmul_kernels.end()) {
             kernel = it->second;
         }
+        
+        // Auto-clear cache when approaching ANE compile limit
+        // ANE has a hard limit of ~100 kernels per process
+        if (!kernel && g_matmul_kernels.size() >= 80) {
+            fprintf(stderr, "[ANE] Kernel cache at limit (%zu/100), auto-clearing to make room for new kernel\n", 
+                    g_matmul_kernels.size());
+            // Clear old kernels to make room
+            g_matmul_kernels.clear();
+            // Reset compile count to allow new compilations
+            ggml_ane_reset_compile_count();
+        }
     }
     
     // Compile kernel if not cached
@@ -852,10 +863,6 @@ static ggml_backend_i ggml_backend_ane_interface = {
 ////////////////////////////////////////////////////////////////////////////////
 
 ggml_backend_t ggml_backend_ane_init(void) {
-    // Clear kernel cache to avoid hitting ANE compile limits
-    // This is important for multiple model loads in the same process
-    ggml_ane_clear_kernel_cache();
-    
     if (!GGML_ANE_AVAILABLE) {
         GGML_ANE_LOG_WARN("ANE not available on this platform");
         return nullptr;

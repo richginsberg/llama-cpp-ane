@@ -35,6 +35,9 @@ bool ggml_ane_is_available(void);
 // Get current compile count
 int ggml_ane_get_compile_count(void);
 
+// Reset compile count (use when clearing kernel cache)
+void ggml_ane_reset_compile_count(void);
+
 // Check if process restart is needed (due to ~119 compile limit)
 bool ggml_ane_needs_restart(void);
 

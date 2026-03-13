@@ -373,8 +373,9 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
         if (!kernel && ggml_ane_get_compile_count() >= 80) {
             fprintf(stderr, "[ANE] Approaching compile limit (%d/100), clearing cache to make room\n", 
                     ggml_ane_get_compile_count());
-            // Clear old kernels to make room
+            // Clear both caches (ggml-ane.mm cache and runtime cache)
             g_matmul_kernels.clear();
+            ggml_ane_clear_cache();  // Clear runtime cache
             // Reset compile count to allow new compilations
             ggml_ane_reset_compile_count();
         }

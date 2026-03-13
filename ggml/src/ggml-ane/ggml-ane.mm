@@ -360,6 +360,8 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
             in_ch, out_ch, spatial, hash, src0->name ? src0->name : "unnamed");
     
     ggml_ane_kernel_t kernel = nullptr;
+    bool should_clear_cache = false;
+    
     {
         std::lock_guard<std::mutex> lock(g_matmul_kernels_mutex);
         auto it = g_matmul_kernels.find(hash);
@@ -367,18 +369,22 @@ static bool ggml_ane_exec_mul_mat(struct ggml_tensor * dst) {
             kernel = it->second;
         }
         
-        // Auto-clear cache when approaching ANE compile limit
+        // Check if we need to clear cache (but don't clear while holding lock)
         // ANE has a hard limit of ~100 kernels per process
-        // Check actual compile count, not just cache size
         if (!kernel && ggml_ane_get_compile_count() >= 80) {
-            fprintf(stderr, "[ANE] Approaching compile limit (%d/100), clearing cache to make room\n", 
-                    ggml_ane_get_compile_count());
-            // Clear both caches (ggml-ane.mm cache and runtime cache)
+            should_clear_cache = true;
+            // Clear our local cache while holding the lock
             g_matmul_kernels.clear();
-            ggml_ane_clear_cache();  // Clear runtime cache
-            // Reset compile count to allow new compilations
-            ggml_ane_reset_compile_count();
         }
+    }
+    
+    // Clear runtime cache OUTSIDE the lock to avoid deadlock
+    // ggml_ane_clear_cache() also tries to acquire g_matmul_kernels_mutex
+    if (should_clear_cache) {
+        fprintf(stderr, "[ANE] Approaching compile limit (%d/100), clearing cache to make room\n", 
+                ggml_ane_get_compile_count());
+        ggml_ane_clear_cache();  // Clear runtime cache (no lock held)
+        ggml_ane_reset_compile_count();
     }
     
     // Compile kernel if not cached
